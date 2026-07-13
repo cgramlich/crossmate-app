@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Crossmate" />
+<meta name="theme-color" content="#f6f3ec" />
+<title>Crossmate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ============================================================
+   THEME TOKENS - light "newsprint" crossword feel, indigo accent.
+   All colors live here so re-skinning is one place (starter spec).
+   ============================================================ */
+:root{
+  --paper:#f6f3ec;          /* page background, warm paper */
+  --surface:#ffffff;        /* cards / inputs */
+  --surface-2:#f0ece1;      /* raised / hover */
+  --ink:#1b1b1e;            /* primary text, near-black */
+  --ink-2:#3d3d42;          /* secondary text */
+  --muted:#74726c;          /* hints */
+  --line:#e4dfd2;           /* hairline */
+  --line-2:#d3ccbb;         /* visible border */
+  --accent:#3358d4;         /* indigo - primary action */
+  --accent-ink:#ffffff;
+  --accent-soft:#e6ebfb;    /* accent tint */
+  --warm:#e0764a;           /* secondary warm accent */
+  --good:#2f9e5f;
+  --bad:#cf4a3a;
+  --grid-black:#15140f;     /* crossword block */
+  --shadow:0 1px 2px rgba(20,18,12,.06),0 6px 20px rgba(20,18,12,.06);
+  --radius:14px;
+  --radius-sm:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"Outfit",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font-size:16px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+h1,h2,h3{font-family:"Fraunces",Georgia,serif; font-weight:600; line-height:1.15; margin:0;}
+button{font-family:inherit;}
+input,textarea{font-family:inherit; font-size:16px;}
+.app{max-width:640px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column;}
+
+/* ---- top bar ---- */
+.topbar{position:sticky; top:0; z-index:20; background:var(--paper);
+  display:flex; align-items:center; gap:10px; padding:14px 16px 10px;
+  border-bottom:1px solid var(--line); padding-top:calc(14px + env(safe-area-inset-top));}
+.brand{display:flex; align-items:center; gap:9px; font-family:"Fraunces",serif;
+  font-weight:700; font-size:22px; letter-spacing:.2px;}
+.brand .mark{flex:0 0 auto;}
+.spacer{flex:1;}
+.syncdot{font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px;}
+.syncdot i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block;}
+.syncdot.ok i{background:var(--good);}
+.syncdot.pending i{background:var(--warm);}
+.syncdot.err i{background:var(--bad);}
+.iconbtn{border:1px solid var(--line-2); background:var(--surface); color:var(--ink-2);
+  width:38px;height:38px;border-radius:50%; font-size:16px; cursor:pointer; display:flex;align-items:center;justify-content:center;}
+
+/* ---- content ---- */
+.main{flex:1; padding:16px; padding-bottom:96px;}
+.screen-title{font-size:26px; margin:4px 2px 14px;}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px; box-shadow:var(--shadow); margin-bottom:12px;}
+.card h3{font-size:18px; margin-bottom:8px;}
+.row{display:flex; align-items:center; gap:10px;}
+.muted{color:var(--muted);}
+.hint{color:var(--muted); font-size:13.5px;}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line);}
+.pill.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent;}
+.byline{font-size:12.5px;color:var(--muted);}
+
+/* ---- buttons ---- */
+.btn{appearance:none;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
+  padding:11px 16px;border-radius:var(--radius-sm);font-weight:600;font-size:15px;cursor:pointer;
+  transition:transform .04s ease, background .15s ease; display:inline-flex;align-items:center;gap:8px;justify-content:center;}
+.btn:active{transform:translateY(1px);}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
+.btn.warm{background:var(--warm);border-color:var(--warm);color:#fff;}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent);padding-left:6px;padding-right:6px;}
+.btn.sm{padding:7px 11px;font-size:13.5px;border-radius:9px;}
+.btn.block{display:flex;width:100%;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.field{width:100%;padding:12px 13px;border:1px solid var(--line-2);border-radius:var(--radius-sm);
+  background:var(--surface);color:var(--ink);margin-top:6px;}
+.field:focus{outline:2px solid var(--accent-soft);border-color:var(--accent);}
+label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
+
+/* ---- bottom nav ---- */
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
+  background:var(--surface);border-top:1px solid var(--line);
+  display:flex;max-width:640px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom);}
+.nav button{flex:1;background:none;border:none;padding:9px 4px 10px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--muted);font-size:11px;font-weight:600;}
+.nav button.active{color:var(--accent);}
+.nav .ni{font-size:20px;line-height:1;}
+
+/* ---- empty state ---- */
+.empty{text-align:center;padding:36px 18px;color:var(--muted);}
+.empty .big{font-size:40px;margin-bottom:10px;}
+
+/* ---- list item ---- */
+.item{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid var(--line);
+  border-radius:var(--radius-sm);background:var(--surface);margin-bottom:9px;cursor:pointer;}
+.item:active{background:var(--surface-2);}
+.item .grow{flex:1;min-width:0;}
+.item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.avatar{width:34px;height:34px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  font-weight:700;color:#fff;font-size:14px;}
+
+/* ---- banner ---- */
+.banner{background:var(--accent);color:#fff;padding:10px 14px;border-radius:var(--radius-sm);
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:14px;}
+.banner.warn{background:var(--warm);}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:60;
+  background:var(--ink);color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:var(--shadow);}
+
+/* ---- auth ---- */
+.auth-wrap{min-height:100vh;display:flex;flex-direction:column;justify-content:center;
+  max-width:400px;margin:0 auto;padding:24px;}
+.auth-logo{text-align:center;margin-bottom:22px;}
+.auth-logo .name{font-family:"Fraunces",serif;font-weight:700;font-size:34px;margin-top:10px;}
+.auth-logo .tag{color:var(--muted);font-size:14.5px;margin-top:4px;}
+.seg{display:flex;background:var(--surface-2);border-radius:999px;padding:4px;margin-bottom:16px;}
+.seg button{flex:1;border:none;background:none;padding:8px;border-radius:999px;font-weight:600;color:var(--muted);cursor:pointer;font-size:14px;}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow);}
+.err{color:var(--bad);font-size:13.5px;margin-top:8px;}
+.ok{color:var(--good);font-size:13.5px;margin-top:8px;}
+.diag{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:10px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap;}
+.grid-preview{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;width:120px;margin:0 auto;}
+.grid-preview i{aspect-ratio:1;background:var(--surface);border:1px solid var(--line-2);border-radius:2px;}
+.grid-preview i.blk{background:var(--grid-black);border-color:var(--grid-black);}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+/* ============================================================
+   CROSSMATE - co-op crossword app (Forever Apps).
+   Single-file PWA: React 18 + Babel (CDN), no build step. Shares the
+   MenuCaptain/Tracker shell (Supabase Auth, collections sync, fetch-based
+   update check) reskinned to Crossmate and wired to crossmate-backend.
+   Step 1 = shell + auth + Friends/Profile (live) + Home (games/library).
+   Grid solving (Solve) and the builder (Build) arrive in Step 2.
+   ============================================================ */
+const { useState, useEffect, useCallback, useRef } = React;
+
+/* ---- version + logging ---- */
+const APP_VERSION = "0.1.0";
+const BUILD = "2026-07-13.1";
+function buildIsNewer(a, b){
+  const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
+  const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
+  for(let i=0;i<len;i++){ const x=pa[i]||0, y=pb[i]||0; if(x>y) return true; if(x<y) return false; }
+  return false;
+}
+const LOG_CAP = 500, LOG = [];
+function log(tag, msg){
+  const line = { t:new Date().toISOString().slice(11,19), tag, msg:String(msg) };
+  LOG.push(line); if(LOG.length>LOG_CAP) LOG.shift();
+  try{ console.log("["+tag+"] "+line.msg); }catch(e){}
+}
+log("INIT","Crossmate booting - v"+APP_VERSION+" (build "+BUILD+")");
+
+/* ---- small utils ---- */
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const nowISO = () => new Date().toISOString();
+const initials = (s) => (String(s||"?").trim()[0]||"?").toUpperCase();
+function colorFor(seed){
+  const cols=["#3358d4","#e0764a","#2f9e5f","#b5599e","#c7a12b","#6f63e0","#d0503f","#2f9fb0"];
+  let h=0; const s=String(seed||""); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0;
+  return cols[h%cols.length];
+}
+
+/* ---- local storage cache (namespaced) ---- */
+const NS = "crossmate:";
+const lsGet = (k, fb) => { try{ const v=localStorage.getItem(NS+k); return v===null?fb:JSON.parse(v); }catch(e){ return fb; } };
+const lsSet = (k, v) => { try{ localStorage.setItem(NS+k, JSON.stringify(v)); }catch(e){} };
+
+/* ============================================================
+   BACKEND + AUTH CONFIG
+   PUBLIC-SAFE values only. The Supabase anon key permits auth, not data
+   access (data flows through the backend with the user's token). The real
+   secrets live only on the Railway backend.
+   TODO (cloud stand-up): set these to the Crossmate Supabase project + the
+   Railway backend URL. Until then the app runs in "not configured" mode.
+   ============================================================ */
+const SUPABASE_URL      = "https://YOUR-CROSSMATE-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "SET_ME_CROSSMATE_ANON_KEY";
+const API_BASE          = "https://YOUR-CROSSMATE-BACKEND.up.railway.app";
+const CONFIGURED = !SUPABASE_URL.includes("YOUR-CROSSMATE") && SUPABASE_ANON_KEY !== "SET_ME_CROSSMATE_ANON_KEY";
+
+const supa = CONFIGURED ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth:{ persistSession:true, autoRefreshToken:true, storage:window.localStorage, storageKey:"crossmate-auth" }
+}) : null;
+
+async function authToken(){
+  if(!supa) return null;
+  try{ const { data } = await supa.auth.getSession(); return data.session ? data.session.access_token : null; }
+  catch(e){ log("ERROR","authToken: "+e.message); return null; }
+}
+
+/* ---- generic backend call ---- */
+async function api(path, opts={}){
+  const token = await authToken();
+  if(!token) throw new Error("Not signed in");
+  const r = await fetch(API_BASE + path, {
+    method: opts.method || "GET",
+    headers: Object.assign({ "Authorization":"Bearer "+token },
+      opts.body ? { "Content-Type":"application/json" } : {}),
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if(!r.ok){
+    let detail = ""; try{ const j=await r.json(); detail=j.detail||""; }catch(e){ try{ detail=await r.text(); }catch(_){} }
+    log("ERROR", (opts.method||"GET")+" "+path+" "+r.status+" "+String(detail).slice(0,140));
+    if(r.status===401) throw new Error("Session expired - sign in again.");
+    throw new Error(detail || ("Request failed ("+r.status+")"));
+  }
+  if(r.status===204) return null;
+  return r.json();
+}
+
+/* ---- collections (per-user library + meta) ---- */
+const collGet = (name) => api("/api/collection/"+name);
+const collPut = (name, data) => api("/api/collection/"+name, { method:"PUT", body:data });
+
+/* ---- Crossmate domain API ---- */
+const Api = {
+  profileMe:      () => api("/api/profile/me"),
+  profileCheck:   (u) => api("/api/profile/check?username="+encodeURIComponent(u)),
+  profileUpdate:  (username, display_name) => api("/api/profile/me", { method:"PUT", body:{ username, display_name } }),
+  connections:    () => api("/api/connections"),
+  connectRequest: (username) => api("/api/connections/request", { method:"POST", body:{ username } }),
+  connectAccept:  (id) => api("/api/connections/"+id+"/accept", { method:"POST", body:{} }),
+  connectRemove:  (id) => api("/api/connections/"+id, { method:"DELETE" }),
+  puzzles:        () => api("/api/puzzles"),
+  puzzle:         (id) => api("/api/puzzles/"+encodeURIComponent(id)),
+  gameCreate:     (puzzle_id) => api("/api/game/create", { method:"POST", body:{ puzzle_id } }),
+  gameMine:       () => api("/api/game/mine"),
+  gameGet:        (code) => api("/api/game/"+code),
+  gameJoin:       (code) => api("/api/game/"+code+"/join", { method:"POST", body:{} }),
+  gameInvite:     (code, username) => api("/api/game/"+code+"/invite", { method:"POST", body:{ username } }),
+};
+
+/* ============================================================
+   LOGO MARK - tiny crossword grid (inline SVG, no asset needed)
+   ============================================================ */
+function Mark({size=26}){
+  const cell=(x,y,blk)=> <rect x={x} y={y} width="7" height="7" rx="1.2"
+    fill={blk?"var(--grid-black)":"var(--surface)"} stroke="var(--line-2)" strokeWidth="0.8" />;
+  return (
+    <svg width={size} height={size} viewBox="0 0 25 25" className="mark" aria-hidden="true">
+      {cell(0,0,false)}{cell(9,0,true)}{cell(18,0,false)}
+      {cell(0,9,true)}{cell(9,9,false)}{cell(18,9,false)}
+      {cell(0,18,false)}{cell(9,18,false)}{cell(18,18,true)}
+    </svg>
+  );
+}
+
+/* ============================================================
+   STORE - auth + sync + domain data. Mirrors Tracker's store hook,
+   trimmed to Crossmate (library collection + games + connections + profile).
+   ============================================================ */
+function useStore(){
+  const [authed,setAuthed] = useState(false);
+  const [authEmail,setAuthEmail] = useState("");
+  const [authReady,setAuthReady] = useState(false);
+  const [online,setOnline] = useState(navigator.onLine);
+  const [sync,setSync] = useState("idle");        // idle|syncing|ok|pending|err
+  const [profile,setProfile] = useState(lsGet("profile", null));
+  const authedRef = useRef(false);
+
+  useEffect(()=>{
+    const on=()=>setOnline(true), off=()=>setOnline(false);
+    window.addEventListener("online",on); window.addEventListener("offline",off);
+    return ()=>{ window.removeEventListener("online",on); window.removeEventListener("offline",off); };
+  },[]);
+
+  // auth bootstrap
+  useEffect(()=>{
+    if(!supa){ setAuthReady(true); return; }
+    let sub;
+    (async()=>{
+      try{
+        const { data } = await supa.auth.getSession();
+        const s = data.session;
+        setAuthed(!!s); authedRef.current=!!s;
+        setAuthEmail(s ? (s.user.email||"") : "");
+      }catch(e){ log("ERROR","getSession: "+e.message); }
+      setAuthReady(true);
+      const res = supa.auth.onAuthStateChange((_ev, session)=>{
+        setAuthed(!!session); authedRef.current=!!session;
+        setAuthEmail(session ? (session.user.email||"") : "");
+        if(!session){ setProfile(null); lsSet("profile",null); }
+      });
+      sub = res.data.subscription;
+    })();
+    return ()=>{ try{ sub && sub.unsubscribe(); }catch(e){} };
+  },[]);
+
+  // load profile once signed in
+  useEffect(()=>{
+    if(!authed) return;
+    (async()=>{
+      try{ const p = await Api.profileMe(); setProfile(p); lsSet("profile",p); }
+      catch(e){ log("ERROR","load profile: "+e.message); }
+    })();
+  },[authed]);
+
+  const signIn = useCallback(async(email,password)=>{
+    if(!supa) throw new Error("App is not configured yet.");
+    const { error } = await supa.auth.signInWithPassword({ email:(email||"").trim(), password:password||"" });
+    if(error) throw new Error(error.message);
+  },[]);
+  const signUp = useCallback(async(email,password)=>{
+    if(!supa) throw new Error("App is not configured yet.");
+    const { data, error } = await supa.auth.signUp({ email:(email||"").trim(), password:password||"" });
+    if(error) throw new Error(error.message);
+    return { needsConfirm: !data.session };
+  },[]);
+  const signOut = useCallback(async()=>{ try{ supa && await supa.auth.signOut(); }catch(e){} },[]);
+  const requestReset = useCallback(async(email)=>{
+    if(!supa) throw new Error("App is not configured yet.");
+    const { error } = await supa.auth.resetPasswordForEmail((email||"").trim());
+    if(error) throw new Error(error.message);
+  },[]);
+
+  const saveProfile = useCallback(async(username, display_name)=>{
+    const p = await Api.profileUpdate(username, display_name);
+    setProfile(p); lsSet("profile",p); return p;
+  },[]);
+
+  return { authed, authEmail, authReady, online, sync, setSync, profile, setProfile,
+           signIn, signUp, signOut, requestReset, saveProfile };
+}
+
+/* ============================================================
+   AUTH SCREEN
+   ============================================================ */
+function AuthScreen({ store }){
+  const [mode,setMode] = useState("in");   // in|up
+  const [email,setEmail] = useState("");
+  const [pw,setPw] = useState("");
+  const [busy,setBusy] = useState(false);
+  const [err,setErr] = useState("");
+  const [ok,setOk] = useState("");
+
+  const submit = async()=>{
+    setErr(""); setOk(""); setBusy(true);
+    try{
+      if(mode==="in"){ await store.signIn(email,pw); }
+      else{
+        const { needsConfirm } = await store.signUp(email,pw);
+        if(needsConfirm) setOk("Check your email to confirm, then sign in.");
+      }
+    }catch(e){ setErr(e.message||"Something went wrong."); }
+    setBusy(false);
+  };
+  const reset = async()=>{
+    setErr(""); setOk("");
+    if(!email.trim()){ setErr("Enter your email first."); return; }
+    try{ await store.requestReset(email); setOk("Password reset email sent."); }
+    catch(e){ setErr(e.message); }
+  };
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-logo">
+        <div className="grid-preview">
+          <i/><i className="blk"/><i/><i/><i className="blk"/>
+          <i className="blk"/><i/><i/><i className="blk"/><i/>
+          <i/><i/><i className="blk"/><i/><i/>
+        </div>
+        <div className="name">Crossmate</div>
+        <div className="tag">Solve crosswords together.</div>
+      </div>
+
+      {!CONFIGURED && (
+        <div className="banner warn" style={{marginBottom:16}}>
+          Setup pending: backend + Supabase not configured yet.
+        </div>
+      )}
+
+      <div className="seg">
+        <button className={mode==="in"?"on":""} onClick={()=>{setMode("in");setErr("");setOk("");}}>Sign in</button>
+        <button className={mode==="up"?"on":""} onClick={()=>{setMode("up");setErr("");setOk("");}}>Create account</button>
+      </div>
+
+      <label className="lbl">Email</label>
+      <input className="field" type="email" autoComplete="email" value={email}
+        onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" />
+      <div style={{height:12}} />
+      <label className="lbl">Password</label>
+      <input className="field" type="password" autoComplete={mode==="in"?"current-password":"new-password"}
+        value={pw} onChange={e=>setPw(e.target.value)}
+        onKeyDown={e=>{ if(e.key==="Enter") submit(); }} placeholder="********" />
+
+      {err && <div className="err">{err}</div>}
+      {ok && <div className="ok">{ok}</div>}
+
+      <div style={{height:18}} />
+      <button className="btn primary block" disabled={busy || !CONFIGURED} onClick={submit}>
+        {busy ? "Please wait..." : (mode==="in" ? "Sign in" : "Create account")}
+      </button>
+      {mode==="in" && <button className="btn ghost block" style={{marginTop:8}} onClick={reset}>Forgot password?</button>}
+      <p className="hint" style={{textAlign:"center",marginTop:18,opacity:.7}}>Crossmate v{APP_VERSION}</p>
+    </div>
+  );
+}
+
+/* ============================================================
+   HOME - your games + start-a-game from the library
+   ============================================================ */
+function Home({ store, onOpenGame, go }){
+  const [games,setGames] = useState(lsGet("games",[]));
+  const [puzzles,setPuzzles] = useState(lsGet("puzzles",[]));
+  const [loading,setLoading] = useState(true);
+  const [err,setErr] = useState("");
+  const [picking,setPicking] = useState(false);
+
+  const load = useCallback(async()=>{
+    setErr(""); store.setSync("syncing");
+    try{
+      const g = await Api.gameMine(); setGames(g.games||[]); lsSet("games",g.games||[]);
+      const p = await Api.puzzles(); setPuzzles(p.puzzles||[]); lsSet("puzzles",p.puzzles||[]);
+      store.setSync("ok");
+    }catch(e){ setErr(e.message); store.setSync("err"); }
+    setLoading(false);
+  },[store]);
+  useEffect(()=>{ load(); },[load]);
+
+  const startGame = async(pz)=>{
+    try{ const r = await Api.gameCreate(pz.id); onOpenGame(r.code); }
+    catch(e){ setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h1 className="screen-title">Your games</h1>
+      {err && <div className="banner warn">{err}</div>}
+
+      {loading ? <div className="empty">Loading...</div> : (
+        games.length===0 ? (
+          <div className="empty">
+            <div className="big">&#9633;</div>
+            <p>No games yet. Start one from a puzzle below and invite your family.</p>
+          </div>
+        ) : games.map(g=>(
+          <div key={g.code} className="item" onClick={()=>onOpenGame(g.code)}>
+            <div className="avatar" style={{background:colorFor(g.code)}}>{initials(g.title||"C")}</div>
+            <div className="grow">
+              <div className="t">{g.title || "Untitled puzzle"}</div>
+              <div className="byline">{g.constructor ? "by "+g.constructor+" - " : ""}{g.status}</div>
+            </div>
+            <span className="pill accent">{g.code}</span>
+          </div>
+        ))
+      )}
+
+      <div className="row" style={{justifyContent:"space-between",margin:"22px 2px 10px"}}>
+        <h2 style={{fontSize:20}}>Puzzle library</h2>
+        <button className="btn ghost sm" onClick={()=>go("build")}>Make one</button>
+      </div>
+      {puzzles.length===0 ? (
+        <div className="card"><p className="muted" style={{margin:0}}>
+          No puzzles yet. The builder (Step 2) will fill this - or seed one from the backend.
+        </p></div>
+      ) : puzzles.map(p=>(
+        <div key={p.id} className="item" onClick={()=> picking?null:startGame(p)}>
+          <div className="avatar" style={{background:colorFor(p.id)}}>{initials(p.title||"P")}</div>
+          <div className="grow">
+            <div className="t">{p.title || "Untitled"}</div>
+            <div className="byline">by {p.constructor || "unknown"} - {p.license}</div>
+          </div>
+          <span className="pill">Start &rarr;</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ============================================================
+   SOLVE - opens a game (Step 1: shows shared state; grid = Step 2)
+   ============================================================ */
+function GameView({ code, store, onBack }){
+  const [g,setG] = useState(null);
+  const [err,setErr] = useState("");
+  const [inviteU,setInviteU] = useState("");
+  const [msg,setMsg] = useState("");
+
+  const load = useCallback(async()=>{
+    setErr("");
+    try{ const d = await Api.gameGet(code); setG(d); }
+    catch(e){ setErr(e.message); }
+  },[code]);
+  useEffect(()=>{ load(); },[load]);
+
+  const invite = async()=>{
+    setMsg("");
+    try{ await Api.gameInvite(code, inviteU); setInviteU(""); setMsg("Invited."); load(); }
+    catch(e){ setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <button className="btn ghost sm" onClick={onBack}>&larr; All games</button>
+      <h1 className="screen-title" style={{marginTop:8}}>{g?.puzzle?.title || "Game"}</h1>
+      {err && <div className="banner warn">{err}</div>}
+      {!g ? <div className="empty">Loading...</div> : (
+        <div>
+          <div className="card">
+            <div className="row" style={{justifyContent:"space-between"}}>
+              <div>
+                <div className="byline">Join code</div>
+                <div style={{fontSize:26,fontFamily:"Fraunces,serif",fontWeight:700,letterSpacing:2}}>{g.code}</div>
+              </div>
+              <span className="pill accent">{g.status}</span>
+            </div>
+            {g.puzzle?.constructor && <div className="byline" style={{marginTop:8}}>by {g.puzzle.constructor}</div>}
+          </div>
+
+          <div className="card" style={{textAlign:"center"}}>
+            <div className="grid-preview" style={{width:150}}>
+              <i/><i className="blk"/><i/><i/><i className="blk"/>
+              <i className="blk"/><i/><i/><i className="blk"/><i/>
+              <i/><i/><i className="blk"/><i/><i/>
+              <i/><i className="blk"/><i/><i/><i/>
+              <i className="blk"/><i/><i/><i className="blk"/><i/>
+            </div>
+            <p className="hint" style={{marginTop:14,marginBottom:0}}>
+              The solving grid arrives in Step 2. The shared state below is already live.
+            </p>
+          </div>
+
+          <div className="card">
+            <h3>Players ({(g.players||[]).length})</h3>
+            {(g.players||[]).map(p=>(
+              <div key={p.user_id} className="row" style={{margin:"8px 0"}}>
+                <div className="avatar" style={{width:28,height:28,fontSize:12,background:p.color||colorFor(p.user_id)}}>{initials(p.display)}</div>
+                <span>{p.display||"Player"}</span>
+              </div>
+            ))}
+            <div className="row" style={{marginTop:10}}>
+              <input className="field" style={{marginTop:0}} placeholder="invite by username"
+                value={inviteU} onChange={e=>setInviteU(e.target.value)} />
+              <button className="btn sm primary" onClick={invite} disabled={!inviteU.trim()}>Invite</button>
+            </div>
+            {msg && <div className="ok">{msg}</div>}
+          </div>
+
+          <div className="card">
+            <h3>Filled cells ({(g.cells||[]).length})</h3>
+            <p className="hint" style={{margin:0}}>
+              {(g.cells||[]).length===0 ? "Nothing filled yet - this is the shared per-cell state the grid will write to."
+                : "Shared fill is syncing per cell."}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   BUILD - placeholder for the builder (Step 2/3)
+   ============================================================ */
+function Build(){
+  return (
+    <div>
+      <h1 className="screen-title">Build a puzzle</h1>
+      <div className="card">
+        <h3>The builder is coming next</h3>
+        <p className="muted">This is where the magic happens: design a grid, get smart fill
+          suggestions from an open wordlist, and one-tap AI clue help. Family puzzles made
+          for each other - the heart of Crossmate.</p>
+        <p className="hint">Planned: grid editor - Spread the Wordlist autofill - AI clue-assist - export to your library.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   FRIENDS - connections + profile (LIVE against the backend)
+   ============================================================ */
+function Friends({ store }){
+  const [conn,setConn] = useState({connections:[],incoming:[],outgoing:[]});
+  const [err,setErr] = useState("");
+  const [addU,setAddU] = useState("");
+  const [busy,setBusy] = useState(false);
+  const needsHandle = !store.profile || !store.profile.username;
+
+  const load = useCallback(async()=>{
+    setErr("");
+    try{ setConn(await Api.connections()); }
+    catch(e){ setErr(e.message); }
+  },[]);
+  useEffect(()=>{ if(!needsHandle) load(); },[load,needsHandle]);
+
+  const add = async()=>{
+    setErr(""); setBusy(true);
+    try{ await Api.connectRequest(addU); setAddU(""); await load(); }
+    catch(e){ setErr(e.message); }
+    setBusy(false);
+  };
+  const accept = async(id)=>{ try{ await Api.connectAccept(id); load(); }catch(e){ setErr(e.message); } };
+  const remove = async(id)=>{ try{ await Api.connectRemove(id); load(); }catch(e){ setErr(e.message); } };
+
+  if(needsHandle) return (
+    <div>
+      <h1 className="screen-title">Friends</h1>
+      <div className="card">
+        <h3>Claim a username first</h3>
+        <p className="muted">People add you by your username. Set one in Settings to start connecting.</p>
+      </div>
+    </div>
+  );
+
+  const Person = ({c, action}) => (
+    <div className="item" style={{cursor:"default"}}>
+      <div className="avatar" style={{background:colorFor(c.user_id)}}>{initials(c.display_name||c.username)}</div>
+      <div className="grow">
+        <div className="t">{c.display_name || ("@"+(c.username||"?"))}</div>
+        {c.display_name && <div className="byline">@{c.username}</div>}
+      </div>
+      {action}
+    </div>
+  );
+
+  return (
+    <div>
+      <h1 className="screen-title">Friends</h1>
+      {err && <div className="banner warn">{err}</div>}
+
+      <div className="card">
+        <label className="lbl">Add by username</label>
+        <div className="row">
+          <input className="field" value={addU} onChange={e=>setAddU(e.target.value)} placeholder="username" />
+          <button className="btn sm primary" onClick={add} disabled={busy || !addU.trim()}>Add</button>
+        </div>
+      </div>
+
+      {conn.incoming.length>0 && <>
+        <h2 style={{fontSize:18,margin:"16px 2px 8px"}}>Requests</h2>
+        {conn.incoming.map(c=><Person key={c.id} c={c} action={
+          <div className="row">
+            <button className="btn sm primary" onClick={()=>accept(c.id)}>Accept</button>
+            <button className="btn sm" onClick={()=>remove(c.id)}>Decline</button>
+          </div>} />)}
+      </>}
+
+      <h2 style={{fontSize:18,margin:"16px 2px 8px"}}>Your crossword buddies</h2>
+      {conn.connections.length===0 ? (
+        <div className="empty"><div className="big">&#128101;</div><p>No connections yet. Add family by username above.</p></div>
+      ) : conn.connections.map(c=><Person key={c.id} c={c} action={
+        <button className="btn sm ghost" onClick={()=>remove(c.id)}>Remove</button>} />)}
+
+      {conn.outgoing.length>0 && <>
+        <h2 style={{fontSize:18,margin:"16px 2px 8px"}}>Pending</h2>
+        {conn.outgoing.map(c=><Person key={c.id} c={c} action={
+          <button className="btn sm ghost" onClick={()=>remove(c.id)}>Cancel</button>} />)}
+      </>}
+    </div>
+  );
+}
+
+/* ============================================================
+   SETTINGS - profile, sign out, diagnostics, version
+   ============================================================ */
+function Settings({ store, toast }){
+  const [username,setUsername] = useState(store.profile?.username || "");
+  const [display,setDisplay] = useState(store.profile?.display_name || "");
+  const [msg,setMsg] = useState(""); const [err,setErr] = useState("");
+  const [showLog,setShowLog] = useState(false);
+
+  const save = async()=>{
+    setMsg(""); setErr("");
+    try{ await store.saveProfile(username, display); setMsg("Saved."); toast("Profile saved"); }
+    catch(e){ setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h1 className="screen-title">Settings</h1>
+      <div className="card">
+        <h3>Your profile</h3>
+        <label className="lbl">Username <span className="hint">(how family adds you)</span></label>
+        <input className="field" value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. chrisg" />
+        <div style={{height:10}} />
+        <label className="lbl">Display name</label>
+        <input className="field" value={display} onChange={e=>setDisplay(e.target.value)} placeholder="Chris" />
+        {err && <div className="err">{err}</div>}
+        {msg && <div className="ok">{msg}</div>}
+        <div style={{height:12}} />
+        <button className="btn primary block" onClick={save}>Save profile</button>
+      </div>
+
+      <div className="card">
+        <div className="row" style={{justifyContent:"space-between"}}>
+          <div><div className="t">{store.authEmail}</div><div className="byline">Signed in</div></div>
+          <button className="btn sm" onClick={async()=>{ await store.signOut(); toast("Signed out"); }}>Sign out</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="row" style={{justifyContent:"space-between"}}>
+          <span className="muted">Diagnostics</span>
+          <button className="btn ghost sm" onClick={()=>setShowLog(v=>!v)}>{showLog?"Hide":"Show"} log</button>
+        </div>
+        {showLog && <div className="diag" style={{marginTop:10}}>
+          {LOG.map((l,i)=><div key={i}>{l.t} [{l.tag}] {l.msg}</div>)}
+        </div>}
+        <p className="hint" style={{marginTop:10,marginBottom:0}}>Crossmate v{APP_VERSION} (build {BUILD})</p>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   APP ROOT
+   ============================================================ */
+function App(){
+  const store = useStore();
+  const [tab,setTab] = useState("home");
+  const [openCode,setOpenCode] = useState(null);
+  const [toastMsg,setToastMsg] = useState("");
+  const [upd,setUpd] = useState(null);
+  const toast = (m)=>{ setToastMsg(m); setTimeout(()=>setToastMsg(""),1800); };
+
+  // fetch-based update check (no service worker; matches the clean base)
+  useEffect(()=>{
+    if(!store.authed) return;
+    const check = async()=>{
+      try{
+        const res = await fetch(location.pathname + "?_=" + Date.now(), { cache:"no-store" });
+        const html = await res.text();
+        const mb = html.match(/const BUILD = "([^"]+)";/);
+        if(mb && buildIsNewer(mb[1], BUILD)){ setUpd(html.match(/const APP_VERSION = "([^"]+)";/)?.[1] || "new"); }
+      }catch(e){}
+    };
+    check();
+    const iv = setInterval(check, 5*60*1000);
+    const onVis = ()=>{ if(!document.hidden) check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return ()=>{ clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  },[store.authed]);
+
+  if(!store.authReady) return <div className="empty" style={{marginTop:80}}>Loading...</div>;
+  if(!store.authed) return <AuthScreen store={store} />;
+
+  const openGame = (code)=>{ setOpenCode(code); setTab("solve"); };
+  const syncCls = store.sync==="ok"?"ok":store.sync==="pending"?"pending":store.sync==="err"?"err":"";
+
+  return (
+    <div className="app">
+      <div className="topbar">
+        <span className="brand"><Mark/> Crossmate</span>
+        <span className="spacer" />
+        <span className={"syncdot "+syncCls}><i/>{store.online ? (store.sync==="err"?"sync error":store.sync==="syncing"?"syncing":"synced") : "offline"}</span>
+      </div>
+
+      <div className="main">
+        {upd && <div className="banner" onClick={()=>location.reload()}>
+          A new version (v{upd}) is ready. Tap to update.
+        </div>}
+        {tab==="home"  && <Home store={store} onOpenGame={openGame} go={setTab} />}
+        {tab==="solve" && (openCode
+          ? <GameView code={openCode} store={store} onBack={()=>{ setOpenCode(null); setTab("home"); }} />
+          : <div className="empty" style={{marginTop:40}}><div className="big">&#9998;</div><p>Open a game from Home to solve.</p></div>)}
+        {tab==="build"   && <Build />}
+        {tab==="friends" && <Friends store={store} />}
+        {tab==="settings"&& <Settings store={store} toast={toast} />}
+      </div>
+
+      <div className="nav">
+        {[["home","Home","⌂"],["solve","Solve","✎"],["build","Build","▦"],["friends","Friends","\u{1F465}"],["settings","You","⚙"]].map(([k,label,ic])=>(
+          <button key={k} className={tab===k?"active":""} onClick={()=>{ if(k!=="solve") setOpenCode(null); setTab(k); }}>
+            <span className="ni">{ic}</span>{label}
+          </button>
+        ))}
+      </div>
+
+      {toastMsg && <div className="toast">{toastMsg}</div>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
