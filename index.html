@@ -192,8 +192,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.2.1";
-const BUILD = "2026-07-14.2";
+const APP_VERSION = "0.2.2";
+const BUILD = "2026-07-14.3";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -666,7 +666,10 @@ function Home({ store, onOpenGame, onSolo, go }){
   const [err,setErr] = useState("");
   const [picking,setPicking] = useState(false);
 
-  const load = useCallback(async()=>{
+  // Plain function + run-once-on-mount. NOTE: do NOT depend on `store` here - the
+  // store object is a fresh reference every render, so a [store] dep would re-run
+  // this forever (the "stuck syncing" bug). Setters captured at mount are stable.
+  const load = async()=>{
     setErr(""); store.setSync("syncing");
     try{
       const g = await Api.gameMine(); setGames(g.games||[]); lsSet("games",g.games||[]);
@@ -674,8 +677,8 @@ function Home({ store, onOpenGame, onSolo, go }){
       store.setSync("ok");
     }catch(e){ setErr(e.message); store.setSync("err"); }
     setLoading(false);
-  },[store]);
-  useEffect(()=>{ load(); },[load]);
+  };
+  useEffect(()=>{ load(); }, []);   // once on mount
 
   const startGame = async(pz)=>{
     try{ const r = await Api.gameCreate(pz.id); onOpenGame(r.code); }
