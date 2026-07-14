@@ -145,6 +145,36 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 .grid-preview{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;width:120px;margin:0 auto;}
 .grid-preview i{aspect-ratio:1;background:var(--surface);border:1px solid var(--line-2);border-radius:2px;}
 .grid-preview i.blk{background:var(--grid-black);border-color:var(--grid-black);}
+
+/* ---- solver (full-screen crossword) ---- */
+.solver{position:fixed;inset:0;z-index:50;background:var(--paper);display:flex;flex-direction:column;max-width:640px;margin:0 auto;}
+.solver-top{display:flex;align-items:center;gap:8px;padding:12px 12px;border-bottom:1px solid var(--line);padding-top:calc(12px + env(safe-area-inset-top));}
+.solver-top .ttl{font-family:"Fraunces",serif;font-weight:600;font-size:17px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.solver-mid{flex:1;overflow:auto;padding:14px 12px 10px;}
+.xgrid{display:grid;gap:2px;width:min(92vw,430px);margin:0 auto;background:var(--grid-black);border:2px solid var(--grid-black);border-radius:4px;}
+.xcell{position:relative;aspect-ratio:1;background:var(--surface);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:clamp(14px,5.2vw,26px);cursor:pointer;user-select:none;color:var(--ink);text-transform:uppercase;}
+.xcell.block{background:var(--grid-black);cursor:default;}
+.xcell.hl{background:var(--accent-soft);}
+.xcell.sel{background:#b9ccf5;}
+.xcell.wrong{color:var(--bad);}
+.xcell .n{position:absolute;top:1px;left:2px;font-size:9px;font-weight:600;color:var(--muted);line-height:1;}
+.cluebar{display:flex;align-items:center;gap:8px;padding:9px 10px;background:var(--surface-2);border-top:1px solid var(--line);}
+.cluebar .cnum{font-weight:700;color:var(--accent);white-space:nowrap;font-size:14px;}
+.cluebar .ctext{flex:1;font-size:14.5px;min-width:0;}
+.cluebar .arw{border:none;background:none;font-size:20px;color:var(--ink-2);cursor:pointer;padding:0 8px;line-height:1;}
+.kbd{padding:6px 4px calc(6px + env(safe-area-inset-bottom));background:var(--surface-2);}
+.kbd-row{display:flex;gap:5px;justify-content:center;margin:4px 0;}
+.kbd-key{flex:1;max-width:36px;height:46px;border:1px solid var(--line-2);background:var(--surface);border-radius:7px;font-weight:600;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--ink);}
+.kbd-key.wide{max-width:52px;font-size:18px;}
+.kbd-key:active{background:var(--surface-2);}
+.cluelist{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cluelist h4{font-family:"Outfit",sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 6px;}
+.clue{display:flex;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13.5px;line-height:1.3;}
+.clue.on{background:var(--accent-soft);}
+.clue .cn{font-weight:700;color:var(--ink-2);min-width:20px;}
+.solved-toast{position:absolute;left:50%;top:16px;transform:translateX(-50%);z-index:60;background:var(--good);color:#fff;
+  padding:12px 20px;border-radius:999px;font-weight:600;box-shadow:var(--shadow);display:flex;align-items:center;gap:12px;}
+.solved-toast button{background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;padding:5px 12px;border-radius:999px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -162,8 +192,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.1.0";
-const BUILD = "2026-07-13.2";
+const APP_VERSION = "0.2.0";
+const BUILD = "2026-07-14.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -425,9 +455,206 @@ function AuthScreen({ store }){
 }
 
 /* ============================================================
+   IPUZ PARSER - normalize an ipuz puzzle into a grid + word model.
+   Handles blocks ("#"/null), computes standard numbering + across/down
+   words from the grid geometry, and maps clues by number.
+   ============================================================ */
+function parsePuzzle(data){
+  if(!data || !data.dimensions) return null;
+  const W = data.dimensions.width, H = data.dimensions.height;
+  const G = data.puzzle || [], S = data.solution || [];
+  const cellVal = (r,c) => (G[r] ? G[r][c] : null);
+  const isBlock = (r,c) => { const v = cellVal(r,c); return v==="#" || v===null || v===undefined || (typeof v==="object" && v && v.cell==="#"); };
+  const solAt = (r,c) => { const v = S[r] ? S[r][c] : null; if(v==null || v==="#") return ""; return String(typeof v==="object" ? (v.value||v.cell||"") : v).toUpperCase(); };
+
+  const cells = [];
+  for(let r=0;r<H;r++){ const row=[]; for(let c=0;c<W;c++){ const blk=isBlock(r,c); row.push({ r, c, block:blk, num:null, sol:blk?"":solAt(r,c) }); } cells.push(row); }
+
+  const across=[], down=[]; let n=1;
+  for(let r=0;r<H;r++) for(let c=0;c<W;c++){
+    const cell=cells[r][c]; if(cell.block) continue;
+    const leftBlk = c===0 || cells[r][c-1].block;
+    const upBlk   = r===0 || cells[r-1][c].block;
+    const rightOpen = c+1<W && !cells[r][c+1].block;
+    const downOpen  = r+1<H && !cells[r+1][c].block;
+    const startA = leftBlk && rightOpen, startD = upBlk && downOpen;
+    if(startA || startD){
+      cell.num = n;
+      if(startA){ const cs=[]; let cc=c; while(cc<W && !cells[r][cc].block){ cs.push(cells[r][cc]); cc++; } across.push({num:n,dir:"A",cells:cs}); }
+      if(startD){ const cs=[]; let rr=r; while(rr<H && !cells[rr][c].block){ cs.push(cells[rr][c]); rr++; } down.push({num:n,dir:"D",cells:cs}); }
+      n++;
+    }
+  }
+  const clueMap = (list)=>{ const m={}; (list||[]).forEach(it=>{
+    if(Array.isArray(it)) m[it[0]] = it[1];
+    else if(it && typeof it==="object") m[it.number||it.num] = it.clue||it.text||"";
+  }); return m; };
+  const cl = data.clues || {};
+  const cA = clueMap(cl.Across || cl.across), cD = clueMap(cl.Down || cl.down);
+  across.forEach(w => w.clue = cA[w.num] || "");
+  down.forEach(w => w.clue = cD[w.num] || "");
+  return { W, H, cells, across, down };
+}
+function wordAt(model, r, c, dir){
+  const list = dir==="A" ? model.across : model.down;
+  return list.find(w => w.cells.some(cl => cl.r===r && cl.c===c)) || null;
+}
+
+/* ============================================================
+   SOLVER - the crossword grid (full-screen). Pure UI over a fill map:
+   `fill` (a {"r,c":letter} object) + `onFill(r,c,letter)`. Solo mode passes
+   local state; co-op (Wave B) will pass the game's shared cells + a backend
+   onFill - the grid itself doesn't care where fills live.
+   ============================================================ */
+const KB_ROWS = ["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"];
+function Solver({ model, fill, onFill, title, subtitle, onBack }){
+  const firstCell = ()=>{ for(const row of model.cells) for(const cell of row) if(!cell.block) return {r:cell.r,c:cell.c}; return {r:0,c:0}; };
+  const [sel,setSel] = useState(firstCell);
+  const [dir,setDir] = useState("A");
+  const [wrong,setWrong] = useState({});
+  const [solved,setSolved] = useState(false);
+  const key = (r,c)=> r+","+c;
+
+  const curWord = wordAt(model, sel.r, sel.c, dir) || wordAt(model, sel.r, sel.c, dir==="A"?"D":"A");
+  const inWord = new Set((curWord?curWord.cells:[]).map(cl=>key(cl.r,cl.c)));
+
+  const selectCell = (r,c)=>{
+    if(model.cells[r][c].block) return;
+    if(sel.r===r && sel.c===c){ const o=dir==="A"?"D":"A"; if(wordAt(model,r,c,o)) setDir(o); }
+    else { setSel({r,c}); if(!wordAt(model,r,c,dir)){ const o=dir==="A"?"D":"A"; if(wordAt(model,r,c,o)) setDir(o); } }
+  };
+  const gotoWord = (w)=>{ setDir(w.dir); const e = w.cells.find(cl=>!fill[key(cl.r,cl.c)]) || w.cells[0]; setSel({r:e.r,c:e.c}); };
+  const stepWord = (delta)=>{
+    const all = [...model.across, ...model.down];
+    const idx = curWord ? all.findIndex(w => w.dir===curWord.dir && w.num===curWord.num) : -1;
+    gotoWord(all[(idx + delta + all.length) % all.length]);
+  };
+  const advance = ()=>{
+    if(!curWord) return;
+    const idx = curWord.cells.findIndex(cl=>cl.r===sel.r && cl.c===sel.c);
+    if(idx>=0 && idx+1 < curWord.cells.length){ const cl=curWord.cells[idx+1]; setSel({r:cl.r,c:cl.c}); }
+    else stepWord(1);
+  };
+  const type = (ch)=>{ onFill(sel.r, sel.c, ch); setWrong(w=>{ const n={...w}; delete n[key(sel.r,sel.c)]; return n; }); advance(); };
+  const backspace = ()=>{
+    if(fill[key(sel.r,sel.c)]) onFill(sel.r, sel.c, "");
+    else if(curWord){ const idx=curWord.cells.findIndex(cl=>cl.r===sel.r&&cl.c===sel.c); if(idx>0){ const cl=curWord.cells[idx-1]; setSel({r:cl.r,c:cl.c}); onFill(cl.r,cl.c,""); } }
+  };
+  const moveSel = (dr,dc)=>{ let r=sel.r+dr, c=sel.c+dc; while(r>=0&&r<model.H&&c>=0&&c<model.W){ if(!model.cells[r][c].block){ setSel({r,c}); setDir(dr!==0?"D":"A"); return; } r+=dr; c+=dc; } };
+
+  const checkPuzzle = ()=>{ const w={}; for(const row of model.cells) for(const cell of row){ if(cell.block) continue; const v=fill[key(cell.r,cell.c)]; if(v && v!==cell.sol) w[key(cell.r,cell.c)]=true; } setWrong(w); };
+  const revealWord = ()=>{ if(curWord){ curWord.cells.forEach(cl=>onFill(cl.r,cl.c,cl.sol)); setWrong({}); } };
+  const revealAll  = ()=>{ for(const row of model.cells) for(const cell of row){ if(!cell.block) onFill(cell.r,cell.c,cell.sol); } setWrong({}); };
+
+  // physical keyboard (desktop); re-bound each render so closures stay fresh
+  useEffect(()=>{
+    const h=(e)=>{
+      if(e.metaKey||e.ctrlKey||e.altKey) return;
+      if(e.key==="Backspace"){ e.preventDefault(); backspace(); }
+      else if(/^[a-zA-Z]$/.test(e.key)){ e.preventDefault(); type(e.key.toUpperCase()); }
+      else if(e.key==="ArrowRight"){ e.preventDefault(); moveSel(0,1); }
+      else if(e.key==="ArrowLeft"){ e.preventDefault(); moveSel(0,-1); }
+      else if(e.key==="ArrowUp"){ e.preventDefault(); moveSel(-1,0); }
+      else if(e.key==="ArrowDown"){ e.preventDefault(); moveSel(1,0); }
+      else if(e.key===" "){ e.preventDefault(); const o=dir==="A"?"D":"A"; if(wordAt(model,sel.r,sel.c,o)) setDir(o); }
+    };
+    window.addEventListener("keydown", h);
+    return ()=>window.removeEventListener("keydown", h);
+  });
+
+  // solved detection
+  useEffect(()=>{
+    let done=true;
+    for(const row of model.cells) for(const cell of row){ if(cell.block) continue; if((fill[key(cell.r,cell.c)]||"")!==cell.sol){ done=false; break; } }
+    setSolved(done);
+  },[fill]);
+
+  return (
+    <div className="solver">
+      <div className="solver-top">
+        <button className="btn ghost sm" onClick={onBack}>&larr; Back</button>
+        <span className="ttl">{title}</span>
+        <button className="btn sm" onClick={checkPuzzle}>Check</button>
+        <button className="btn sm" onClick={revealWord}>Reveal</button>
+      </div>
+
+      <div className="solver-mid">
+        <div className="xgrid" style={{gridTemplateColumns:"repeat("+model.W+",1fr)"}}>
+          {model.cells.flat().map(cell=>{
+            const k=key(cell.r,cell.c);
+            if(cell.block) return <div key={k} className="xcell block" />;
+            const cls = "xcell" + (inWord.has(k)?" hl":"") + ((sel.r===cell.r&&sel.c===cell.c)?" sel":"") + (wrong[k]?" wrong":"");
+            return <div key={k} className={cls} onClick={()=>selectCell(cell.r,cell.c)}>
+              {cell.num ? <span className="n">{cell.num}</span> : null}
+              {fill[k]||""}
+            </div>;
+          })}
+        </div>
+
+        <div className="cluelist">
+          <div>
+            <h4>Across</h4>
+            {model.across.map(w=>(
+              <div key={"A"+w.num} className={"clue"+(curWord&&curWord.dir==="A"&&curWord.num===w.num?" on":"")} onClick={()=>gotoWord(w)}>
+                <span className="cn">{w.num}</span><span>{w.clue}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <h4>Down</h4>
+            {model.down.map(w=>(
+              <div key={"D"+w.num} className={"clue"+(curWord&&curWord.dir==="D"&&curWord.num===w.num?" on":"")} onClick={()=>gotoWord(w)}>
+                <span className="cn">{w.num}</span><span>{w.clue}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{textAlign:"center",marginTop:16}}>
+          <button className="btn ghost sm" onClick={revealAll}>Reveal whole puzzle</button>
+          {subtitle && <div className="byline" style={{marginTop:6}}>{subtitle}</div>}
+        </div>
+      </div>
+
+      <div className="cluebar">
+        <button className="arw" onClick={()=>stepWord(-1)}>&lsaquo;</button>
+        <span className="cnum">{curWord ? (curWord.num + (curWord.dir==="A"?"A":"D")) : ""}</span>
+        <span className="ctext">{curWord ? curWord.clue : ""}</span>
+        <button className="arw" onClick={()=>stepWord(1)}>&rsaquo;</button>
+      </div>
+
+      <div className="kbd">
+        {KB_ROWS.map((row,i)=>(
+          <div className="kbd-row" key={i}>
+            {row.split("").map(ch=><button key={ch} className="kbd-key" onClick={()=>type(ch)}>{ch}</button>)}
+            {i===2 && <button className="kbd-key wide" onClick={backspace}>&#9003;</button>}
+          </div>
+        ))}
+      </div>
+
+      {solved && <div className="solved-toast">Solved! &#127881; <button onClick={onBack}>Done</button></div>}
+    </div>
+  );
+}
+
+/* SoloSolve - loads a puzzle by id, holds fill locally (per-puzzle), renders Solver. */
+function SoloSolve({ puzzleId, onBack }){
+  const [pz,setPz] = useState(null);
+  const [err,setErr] = useState("");
+  const [fill,setFill] = useState(()=> lsGet("solo:"+puzzleId, {}));
+  useEffect(()=>{ (async()=>{ try{ setPz(await Api.puzzle(puzzleId)); }catch(e){ setErr(e.message); } })(); },[puzzleId]);
+  const onFill = (r,c,ch)=> setFill(f=>{ const n={...f}; const k=r+","+c; if(ch) n[k]=ch; else delete n[k]; lsSet("solo:"+puzzleId, n); return n; });
+  const model = pz ? parsePuzzle(pz.data) : null;
+  if(err) return <div className="solver"><div className="solver-top"><button className="btn ghost sm" onClick={onBack}>&larr; Back</button></div><div className="empty">{err}</div></div>;
+  if(!model) return <div className="solver"><div className="solver-top"><button className="btn ghost sm" onClick={onBack}>&larr; Back</button></div><div className="empty">Loading puzzle...</div></div>;
+  return <Solver model={model} fill={fill} onFill={onFill}
+    title={pz.title||"Puzzle"} subtitle={pz.constructor ? "by "+pz.constructor : ""} onBack={onBack} />;
+}
+
+/* ============================================================
    HOME - your games + start-a-game from the library
    ============================================================ */
-function Home({ store, onOpenGame, go }){
+function Home({ store, onOpenGame, onSolo, go }){
   const [games,setGames] = useState(lsGet("games",[]));
   const [puzzles,setPuzzles] = useState(lsGet("puzzles",[]));
   const [loading,setLoading] = useState(true);
@@ -482,13 +709,13 @@ function Home({ store, onOpenGame, go }){
           No puzzles yet. The builder (Step 2) will fill this - or seed one from the backend.
         </p></div>
       ) : puzzles.map(p=>(
-        <div key={p.id} className="item" onClick={()=> picking?null:startGame(p)}>
+        <div key={p.id} className="item" onClick={()=>onSolo(p.id)}>
           <div className="avatar" style={{background:colorFor(p.id)}}>{initials(p.title||"P")}</div>
           <div className="grow">
             <div className="t">{p.title || "Untitled"}</div>
             <div className="byline">by {p.constructor || "unknown"} - {p.license}</div>
           </div>
-          <span className="pill">Start &rarr;</span>
+          <button className="btn sm" onClick={(e)=>{ e.stopPropagation(); startGame(p); }}>Together</button>
         </div>
       ))}
     </div>
@@ -738,6 +965,7 @@ function App(){
   const store = useStore();
   const [tab,setTab] = useState("home");
   const [openCode,setOpenCode] = useState(null);
+  const [soloId,setSoloId] = useState(null);
   const [toastMsg,setToastMsg] = useState("");
   const [upd,setUpd] = useState(null);
   const toast = (m)=>{ setToastMsg(m); setTimeout(()=>setToastMsg(""),1800); };
@@ -778,7 +1006,7 @@ function App(){
         {upd && <div className="banner" onClick={()=>location.reload()}>
           A new version (v{upd}) is ready. Tap to update.
         </div>}
-        {tab==="home"  && <Home store={store} onOpenGame={openGame} go={setTab} />}
+        {tab==="home"  && <Home store={store} onOpenGame={openGame} onSolo={setSoloId} go={setTab} />}
         {tab==="solve" && (openCode
           ? <GameView code={openCode} store={store} onBack={()=>{ setOpenCode(null); setTab("home"); }} />
           : <div className="empty" style={{marginTop:40}}><div className="big">&#9998;</div><p>Open a game from Home to solve.</p></div>)}
@@ -796,6 +1024,7 @@ function App(){
       </div>
 
       {toastMsg && <div className="toast">{toastMsg}</div>}
+      {soloId && <SoloSolve puzzleId={soloId} onBack={()=>setSoloId(null)} />}
     </div>
   );
 }
