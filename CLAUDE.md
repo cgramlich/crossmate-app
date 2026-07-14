@@ -13,8 +13,10 @@ Crossmate, wired to `crossmate-backend`. Offline = localStorage cache + fetch-ba
 check (NO service worker, matching the clean base). Parity build, NOT a store target.
 
 ## Coordinates
-- Repo: `cgramlich/crossmate-app` (to be created; public, GitHub Pages).
-- Backend: `crossmate-backend` (Railway). Set `API_BASE` in index.html to its URL.
+- Repo: `cgramlich/crossmate-app` (public). LIVE at https://cgramlich.github.io/crossmate-app/
+  (GitHub Pages, master/root). Configured + live 2026-07-13.
+- Backend: `crossmate-backend` -> https://web-production-8202f.up.railway.app (Railway).
+  Supabase project `cosxmhvsnghrbfrtysvg`. `API_BASE` in index.html points here.
 - Version: `APP_VERSION` (friendly) + `BUILD` ("YYYY-MM-DD.N", what the updater compares).
   Bump BOTH on every deploy (BUILD must be strictly newer or the update prompt won't fire).
 
