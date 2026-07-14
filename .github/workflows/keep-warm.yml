@@ -1,0 +1,14 @@
+name: keep-warm
+# Ping the Crossmate backend so Railway doesn't spin it down (kills the slow
+# cold-start on first puzzle open). Runs from this PUBLIC repo = free Actions.
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every ~10 min (GitHub may delay under load)
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          curl -sS -m 30 https://web-production-8202f.up.railway.app/health || true
