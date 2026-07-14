@@ -192,8 +192,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.2.0";
-const BUILD = "2026-07-14.1";
+const APP_VERSION = "0.2.1";
+const BUILD = "2026-07-14.2";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -639,10 +639,15 @@ function Solver({ model, fill, onFill, title, subtitle, onBack }){
 
 /* SoloSolve - loads a puzzle by id, holds fill locally (per-puzzle), renders Solver. */
 function SoloSolve({ puzzleId, onBack }){
-  const [pz,setPz] = useState(null);
+  // cache-first: puzzles are immutable content, so a cached copy renders instantly
+  // while we revalidate in the background (fixes slow first-open on a cold backend).
+  const [pz,setPz] = useState(()=> lsGet("pzdata:"+puzzleId, null));
   const [err,setErr] = useState("");
   const [fill,setFill] = useState(()=> lsGet("solo:"+puzzleId, {}));
-  useEffect(()=>{ (async()=>{ try{ setPz(await Api.puzzle(puzzleId)); }catch(e){ setErr(e.message); } })(); },[puzzleId]);
+  useEffect(()=>{ (async()=>{
+    try{ const p = await Api.puzzle(puzzleId); setPz(p); lsSet("pzdata:"+puzzleId, p); }
+    catch(e){ if(!lsGet("pzdata:"+puzzleId, null)) setErr(e.message); }
+  })(); },[puzzleId]);
   const onFill = (r,c,ch)=> setFill(f=>{ const n={...f}; const k=r+","+c; if(ch) n[k]=ch; else delete n[k]; lsSet("solo:"+puzzleId, n); return n; });
   const model = pz ? parsePuzzle(pz.data) : null;
   if(err) return <div className="solver"><div className="solver-top"><button className="btn ghost sm" onClick={onBack}>&larr; Back</button></div><div className="empty">{err}</div></div>;
