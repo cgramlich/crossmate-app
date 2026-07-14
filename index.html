@@ -163,7 +163,7 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
 const APP_VERSION = "0.1.0";
-const BUILD = "2026-07-13.1";
+const BUILD = "2026-07-13.2";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -201,10 +201,10 @@ const lsSet = (k, v) => { try{ localStorage.setItem(NS+k, JSON.stringify(v)); }c
    TODO (cloud stand-up): set these to the Crossmate Supabase project + the
    Railway backend URL. Until then the app runs in "not configured" mode.
    ============================================================ */
-const SUPABASE_URL      = "https://YOUR-CROSSMATE-PROJECT.supabase.co";
-const SUPABASE_ANON_KEY = "SET_ME_CROSSMATE_ANON_KEY";
-const API_BASE          = "https://YOUR-CROSSMATE-BACKEND.up.railway.app";
-const CONFIGURED = !SUPABASE_URL.includes("YOUR-CROSSMATE") && SUPABASE_ANON_KEY !== "SET_ME_CROSSMATE_ANON_KEY";
+const SUPABASE_URL      = "https://cosxmhvsnghrbfrtysvg.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvc3htaHZzbmdocmJmcnR5c3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5OTc0OTQsImV4cCI6MjA5OTU3MzQ5NH0.mjRpd2eU-4tT0XICbmRwUCM8JVEdyKnTWMu_8C_dJdI";
+const API_BASE          = "https://web-production-8202f.up.railway.app";
+const CONFIGURED = !SUPABASE_URL.includes("YOUR-CROSSMATE") && !API_BASE.includes("YOUR-CROSSMATE") && SUPABASE_ANON_KEY.startsWith("eyJ");
 
 const supa = CONFIGURED ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth:{ persistSession:true, autoRefreshToken:true, storage:window.localStorage, storageKey:"crossmate-auth" }
