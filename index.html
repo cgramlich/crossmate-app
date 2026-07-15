@@ -195,8 +195,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.3.1";
-const BUILD = "2026-07-14.5";
+const APP_VERSION = "0.3.2";
+const BUILD = "2026-07-14.6";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -309,6 +309,7 @@ const Api = {
   gameGet:        (code) => api("/api/game/"+code),
   gameJoin:       (code) => api("/api/game/"+code+"/join", { method:"POST", body:{} }),
   gameInvite:     (code, username) => api("/api/game/"+code+"/invite", { method:"POST", body:{ username } }),
+  gameDelete:     (code) => api("/api/game/"+code, { method:"DELETE" }),
 };
 
 /* ============================================================
@@ -721,6 +722,10 @@ function Home({ store, onOpenGame, onSolo, go }){
     try{ const r = await Api.gameCreate(pz.id); onOpenGame(r.code); }
     catch(e){ setErr(e.message); }
   };
+  const removeGame = async(code)=>{
+    setGames(gs=>gs.filter(g=>g.code!==code));   // optimistic
+    try{ await Api.gameDelete(code); }catch(e){ setErr(e.message); }
+  };
 
   return (
     <div>
@@ -741,6 +746,8 @@ function Home({ store, onOpenGame, onSolo, go }){
               <div className="byline">{g.constructor ? "by "+g.constructor+" - " : ""}{g.status}</div>
             </div>
             <span className="pill accent">{g.code}</span>
+            <button className="btn ghost sm" title="Remove" style={{color:"var(--muted)",padding:"4px 8px"}}
+              onClick={(e)=>{ e.stopPropagation(); removeGame(g.code); }}>&times;</button>
           </div>
         ))
       )}
