@@ -132,6 +132,10 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 .banner{background:var(--accent);color:#fff;padding:10px 14px;border-radius:var(--radius-sm);
   display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:14px;}
 .banner.warn{background:var(--warm);}
+/* update bar (portfolio standard): full-width tappable strip above the top bar */
+.update-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:var(--accent);color:#fff;border:none;text-align:left;padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;font-size:13.5px;font-weight:600;cursor:pointer;}
+.update-go{flex:0 0 auto;background:#fff;color:var(--accent);border-radius:999px;padding:6px 15px;font-weight:800;font-size:12.5px;}
+.updrow{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:4px 0 2px;}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:60;
   background:var(--ink);color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:var(--shadow);}
 
@@ -201,8 +205,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.3.4";
-const BUILD = "2026-07-22.2";
+const APP_VERSION = "0.3.5";
+const BUILD = "2026-07-23.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -983,7 +987,7 @@ function Friends({ store }){
 /* ============================================================
    SETTINGS - profile, sign out, diagnostics, version
    ============================================================ */
-function Settings({ store, toast }){
+function Settings({ store, toast, onCheckUpdate, updMsg, update, onApplyUpdate }){
   const [username,setUsername] = useState(store.profile?.username || "");
   const [display,setDisplay] = useState(store.profile?.display_name || "");
   const [msg,setMsg] = useState(""); const [err,setErr] = useState("");
@@ -1026,8 +1030,15 @@ function Settings({ store, toast }){
         {showLog && <div className="diag" style={{marginTop:10}}>
           {LOG.map((l,i)=><div key={i}>{l.t} [{l.tag}] {l.msg}</div>)}
         </div>}
-        <p className="hint" style={{marginTop:10,marginBottom:0}}>Crossmate v{APP_VERSION} (build {BUILD})</p>
       </div>
+
+      <div className="updrow">
+        {update
+          ? <button className="btn primary sm" style={{margin:0}} onClick={()=>onApplyUpdate && onApplyUpdate()}>Update to v{update.ver||update.build}</button>
+          : <button className="btn ghost sm" style={{margin:0}} onClick={()=>onCheckUpdate && onCheckUpdate(true)}>Check for updates</button>}
+        {updMsg && <span className="hint" style={{margin:0}}>{updMsg}</span>}
+      </div>
+      <p className="hint" style={{textAlign:"center",marginTop:6}}>Crossmate v{APP_VERSION}</p>
     </div>
   );
 }
@@ -1041,30 +1052,56 @@ function App(){
   const [openCode,setOpenCode] = useState(null);
   const [soloId,setSoloId] = useState(null);
   const [toastMsg,setToastMsg] = useState("");
-  const [upd,setUpd] = useState(null);
   const toast = (m)=>{ setToastMsg(m); setTimeout(()=>setToastMsg(""),1800); };
 
   // Warm the (possibly sleeping) backend the instant the app opens - even before
   // sign-in - so the first real request isn't a cold start.
   useEffect(()=>{ warmBackend(); }, []);
 
-  // fetch-based update check (no service worker; matches the clean base)
+  // --- PWA self-update: detect a newer deployed build and offer a one-tap refresh ---
+  // Installed PWAs cache the HTML hard; this fetches the deployed file fresh, reads its
+  // BUILD stamp, and surfaces a banner when a genuinely newer build is live.
+  // (No service worker in Crossmate by design, so "apply" is a cache-busted reload.)
+  const [update,setUpdate]=useState(null);   // { ver, build } of a newer deployed build, else null
+  const [updMsg,setUpdMsg]=useState("");     // inline status for the Settings "Check for updates" row
+  const updTimer = useRef(null);
+  // Show a status line for a few seconds then clear it (used for terminal results).
+  const flashUpd = useCallback((msg)=>{ setUpdMsg(msg); if(updTimer.current) clearTimeout(updTimer.current); updTimer.current = setTimeout(()=>setUpdMsg(""), 4000); },[]);
+  // manual=true is the Settings button: show inline "Checking..." then a result. On
+  // launch/resume we check quietly and only surface the banner if there's an update.
+  // Detection compares the deployed BUILD (monotonic date stamp) so it never misfires;
+  // the deployed APP_VERSION is read alongside it purely to LABEL the update ("v0.3.5").
+  const checkUpdate = useCallback(async (manual=false)=>{
+    if(manual){ if(updTimer.current) clearTimeout(updTimer.current); setUpdMsg("Checking..."); }
+    try{
+      const res = await fetch(location.pathname + "?_=" + Date.now(), { cache:"no-store" });
+      if(!res.ok){ log("UPDATE","check http "+res.status); if(manual) flashUpd("Couldn't check - are you online?"); return; }
+      const html = await res.text();
+      const mb = html.match(/const BUILD = "([^"]+)";/);       const rBuild = mb && mb[1];
+      const mv = html.match(/const APP_VERSION = "([^"]+)";/); const rVer = mv && mv[1];
+      if(rBuild && buildIsNewer(rBuild, BUILD)){ log("UPDATE","newer build live: "+rBuild+" (v"+(rVer||"?")+")"); setUpdate({ ver:rVer, build:rBuild }); if(manual) setUpdMsg(""); }
+      else { log("UPDATE","up to date (v"+APP_VERSION+", "+BUILD+")"); setUpdate(null); if(manual) flashUpd("You're on the latest (v"+APP_VERSION+")"); }
+    }catch(e){ log("UPDATE","check failed: "+e.message); if(manual) flashUpd("Update check failed"); }
+  },[flashUpd]);
+  // Check on launch AND on resume AND on a periodic timer - installed PWAs are usually
+  // RESUMED from the background, not cold-launched, so a launch-only check means the
+  // banner rarely surfaces on its own. Debounced so a burst of resumes only refetches once.
   useEffect(()=>{
-    if(!store.authed) return;
-    const check = async()=>{
-      try{
-        const res = await fetch(location.pathname + "?_=" + Date.now(), { cache:"no-store" });
-        const html = await res.text();
-        const mb = html.match(/const BUILD = "([^"]+)";/);
-        if(mb && buildIsNewer(mb[1], BUILD)){ setUpd(html.match(/const APP_VERSION = "([^"]+)";/)?.[1] || "new"); }
-      }catch(e){}
-    };
-    check();
-    const iv = setInterval(check, 5*60*1000);
-    const onVis = ()=>{ if(!document.hidden) check(); };
+    let last=0; const GAP=60*1000;
+    const maybe=()=>{ const now=Date.now(); if(now-last<GAP) return; last=now; checkUpdate(false); };
+    const t=setTimeout(maybe, 1200);                       // initial launch check
+    const onVis=()=>{ if(document.visibilityState==="visible") maybe(); };
     document.addEventListener("visibilitychange", onVis);
-    return ()=>{ clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
-  },[store.authed]);
+    const iv=setInterval(maybe, 20*60*1000);               // periodic while open
+    return ()=>{ clearTimeout(t); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  },[checkUpdate]);
+  // Apply by navigating to a build-stamped URL so iOS can't serve the cached HTML.
+  // No service worker here, so a cache-busted replace is the whole story.
+  function applyUpdate(){
+    const stamp=(update&&update.build)||String(Date.now());
+    log("UPDATE","applying -> "+stamp);
+    window.location.replace(location.pathname + "?u=" + encodeURIComponent(stamp));
+  }
 
   if(!store.authReady) return <div className="empty" style={{marginTop:80}}>Loading...</div>;
   if(!store.authed) return <AuthScreen store={store} />;
@@ -1074,6 +1111,11 @@ function App(){
 
   return (
     <div className="app">
+      {update &&
+        <button className="update-bar" onClick={applyUpdate}>
+          <span>Update available <b>(v{update.ver||update.build})</b></span>
+          <span className="update-go">Refresh</span>
+        </button>}
       <div className="topbar">
         <span className="brand"><Mark/> Crossmate</span>
         <span className="spacer" />
@@ -1081,16 +1123,13 @@ function App(){
       </div>
 
       <div className="main">
-        {upd && <div className="banner" onClick={()=>location.reload()}>
-          A new version (v{upd}) is ready. Tap to update.
-        </div>}
         {tab==="home"  && <Home store={store} onOpenGame={openGame} onSolo={setSoloId} go={setTab} />}
         {tab==="solve" && (openCode
           ? <GameView code={openCode} store={store} onBack={()=>{ setOpenCode(null); setTab("home"); }} />
           : <div className="empty" style={{marginTop:40}}><div className="big">&#9998;</div><p>Open a game from Home to solve.</p></div>)}
         {tab==="build"   && <Build />}
         {tab==="friends" && <Friends store={store} />}
-        {tab==="settings"&& <Settings store={store} toast={toast} />}
+        {tab==="settings"&& <Settings store={store} toast={toast} onCheckUpdate={checkUpdate} updMsg={updMsg} update={update} onApplyUpdate={applyUpdate} />}
       </div>
 
       <div className="nav">
