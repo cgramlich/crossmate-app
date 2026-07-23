@@ -195,8 +195,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.3.2";
-const BUILD = "2026-07-14.6";
+const APP_VERSION = "0.3.3";
+const BUILD = "2026-07-22.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -334,6 +334,7 @@ function Mark({size=26}){
 function useStore(){
   const [authed,setAuthed] = useState(false);
   const [authEmail,setAuthEmail] = useState("");
+  const [authUserId,setAuthUserId] = useState("");
   const [authReady,setAuthReady] = useState(false);
   const [online,setOnline] = useState(navigator.onLine);
   const [sync,setSync] = useState("idle");        // idle|syncing|ok|pending|err
@@ -356,11 +357,13 @@ function useStore(){
         const s = data.session;
         setAuthed(!!s); authedRef.current=!!s;
         setAuthEmail(s ? (s.user.email||"") : "");
+        setAuthUserId(s ? (s.user.id||"") : "");
       }catch(e){ log("ERROR","getSession: "+e.message); }
       setAuthReady(true);
       const res = supa.auth.onAuthStateChange((_ev, session)=>{
         setAuthed(!!session); authedRef.current=!!session;
         setAuthEmail(session ? (session.user.email||"") : "");
+        setAuthUserId(session ? (session.user.id||"") : "");
         if(!session){ setProfile(null); lsSet("profile",null); }
       });
       sub = res.data.subscription;
@@ -400,7 +403,7 @@ function useStore(){
     setProfile(p); lsSet("profile",p); return p;
   },[]);
 
-  return { authed, authEmail, authReady, online, sync, setSync, profile, setProfile,
+  return { authed, authEmail, authUserId, authReady, online, sync, setSync, profile, setProfile,
            signIn, signUp, signOut, requestReset, saveProfile };
 }
 
@@ -782,6 +785,7 @@ function GameView({ code, store, onBack }){
   const [err,setErr] = useState("");
   const [inviteU,setInviteU] = useState("");
   const [msg,setMsg] = useState("");
+  const [invErr,setInvErr] = useState("");
 
   const load = useCallback(async()=>{
     setErr("");
@@ -791,10 +795,12 @@ function GameView({ code, store, onBack }){
   useEffect(()=>{ load(); },[load]);
 
   const invite = async()=>{
-    setMsg("");
+    setMsg(""); setInvErr("");
     try{ await Api.gameInvite(code, inviteU); setInviteU(""); setMsg("Invited."); load(); }
-    catch(e){ setErr(e.message); }
+    catch(e){ setInvErr(e.message || "Could not send that invite. Try again."); }
   };
+
+  const isCreator = !!(g && store.authUserId && g.created_by === store.authUserId);
 
   return (
     <div>
@@ -835,12 +841,22 @@ function GameView({ code, store, onBack }){
                 <span>{p.display||"Player"}</span>
               </div>
             ))}
-            <div className="row" style={{marginTop:10}}>
-              <input className="field" style={{marginTop:0}} placeholder="invite by username"
-                value={inviteU} onChange={e=>setInviteU(e.target.value)} />
-              <button className="btn sm primary" onClick={invite} disabled={!inviteU.trim()}>Invite</button>
-            </div>
+            {isCreator ? (
+              <div className="row" style={{marginTop:10}}>
+                <input className="field" style={{marginTop:0}} placeholder="invite by username"
+                  value={inviteU} onChange={e=>setInviteU(e.target.value)} />
+                <button className="btn sm primary" onClick={invite} disabled={!inviteU.trim()}>Invite</button>
+              </div>
+            ) : (
+              <p className="hint" style={{marginTop:10,marginBottom:0}}>
+                Ask the game creator to invite players, or share the join code above.
+              </p>
+            )}
+            {isCreator && <p className="hint" style={{marginTop:8,marginBottom:0}}>
+              You can invite people from your Friends list (accepted connections).
+            </p>}
             {msg && <div className="ok">{msg}</div>}
+            {invErr && <div className="banner warn" style={{marginTop:10,marginBottom:0}}>{invErr}</div>}
           </div>
 
           <div className="card">
