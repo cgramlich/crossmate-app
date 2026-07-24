@@ -212,8 +212,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.3.6";
-const BUILD = "2026-07-23.2";
+const APP_VERSION = "0.3.7";
+const BUILD = "2026-07-24.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -719,15 +719,22 @@ function SoloSolve({ puzzleId, onBack }){
    Swipe a row left to reveal a destructive action. Horizontal-only,
    so vertical scroll is unaffected; a swipe suppresses the row's
    open-on-tap. `label` names the action (Delete vs Leave vs Remove).
+   NOTE: setPointerCapture is DEFERRED until horizontal drag intent
+   is established. Capturing on pointerdown retargets the follow-up
+   click to the swipe body on desktop mice, so a wrapped row's
+   onClick never fires (HomeCaptain finding).
    ============================================================ */
 function SwipeRow({ onAction, label, children }){
   const [dx,setDx] = useState(0);
   const st = useRef(null); const moved = useRef(false);
-  function down(e){ st.current = { x:e.clientX, y:e.clientY, base:dx }; moved.current = false; try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} }
+  function down(e){ st.current = { x:e.clientX, y:e.clientY, base:dx }; moved.current = false; }
   function move(e){
     if(!st.current) return;
     const ddx = e.clientX - st.current.x, ddy = e.clientY - st.current.y;
-    if(Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) moved.current = true;
+    if(!moved.current && Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)){
+      moved.current = true;
+      try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){}
+    }
     if(moved.current){ setDx(Math.max(-96, Math.min(0, st.current.base + ddx))); }
   }
   function end(){ if(!st.current) return; st.current = null; setDx(d => { const nd = d <= -48 ? -84 : 0; if(nd===0) moved.current = false; return nd; }); }
