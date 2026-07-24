@@ -124,6 +124,13 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
   border-radius:var(--radius-sm);background:var(--surface);margin-bottom:9px;cursor:pointer;}
 .item:active{background:var(--surface-2);}
 .item .grow{flex:1;min-width:0;}
+/* swipe-left-to-delete on user-owned list rows (portfolio standard) */
+.swipe-wrap{position:relative;overflow:hidden;border-radius:var(--radius-sm);margin-bottom:9px;}
+.swipe-wrap .item{margin-bottom:0;}
+.swipe-del{position:absolute;top:0;right:0;bottom:0;width:88px;border:none;background:var(--bad);color:#fff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:12px;font-weight:700;cursor:pointer;}
+.swipe-del svg{width:18px;height:18px;stroke:#fff;stroke-width:2;fill:none;}
+.swipe-body{position:relative;background:var(--paper);touch-action:pan-y;will-change:transform;}
 .item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .avatar{width:34px;height:34px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
   font-weight:700;color:#fff;font-size:14px;}
@@ -205,8 +212,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.3.5";
-const BUILD = "2026-07-23.1";
+const APP_VERSION = "0.3.6";
+const BUILD = "2026-07-23.2";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -708,6 +715,38 @@ function SoloSolve({ puzzleId, onBack }){
 }
 
 /* ============================================================
+   SWIPE ROW (portfolio standard, ported from Priority Captain)
+   Swipe a row left to reveal a destructive action. Horizontal-only,
+   so vertical scroll is unaffected; a swipe suppresses the row's
+   open-on-tap. `label` names the action (Delete vs Leave vs Remove).
+   ============================================================ */
+function SwipeRow({ onAction, label, children }){
+  const [dx,setDx] = useState(0);
+  const st = useRef(null); const moved = useRef(false);
+  function down(e){ st.current = { x:e.clientX, y:e.clientY, base:dx }; moved.current = false; try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} }
+  function move(e){
+    if(!st.current) return;
+    const ddx = e.clientX - st.current.x, ddy = e.clientY - st.current.y;
+    if(Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) moved.current = true;
+    if(moved.current){ setDx(Math.max(-96, Math.min(0, st.current.base + ddx))); }
+  }
+  function end(){ if(!st.current) return; st.current = null; setDx(d => { const nd = d <= -48 ? -84 : 0; if(nd===0) moved.current = false; return nd; }); }
+  function clickCapture(e){ if(moved.current || dx !== 0){ e.stopPropagation(); e.preventDefault(); moved.current = false; setDx(0); } }
+  return (
+    <div className="swipe-wrap">
+      <button className="swipe-del" onClick={(e)=>{ e.stopPropagation(); setDx(0); onAction(); }}>
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <span>{label||"Delete"}</span>
+      </button>
+      <div className="swipe-body" style={{ transform:"translateX("+dx+"px)", transition: st.current ? "none" : "transform .18s" }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onClickCapture={clickCapture}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    HOME - your games + start-a-game from the library
    ============================================================ */
 function Home({ store, onOpenGame, onSolo, go }){
@@ -735,9 +774,16 @@ function Home({ store, onOpenGame, onSolo, go }){
     try{ const r = await Api.gameCreate(pz.id); onOpenGame(r.code); }
     catch(e){ setErr(e.message); }
   };
-  const removeGame = async(code)=>{
-    setGames(gs=>gs.filter(g=>g.code!==code));   // optimistic
-    try{ await Api.gameDelete(code); }catch(e){ setErr(e.message); }
+  // One endpoint, two meanings (backend rule): the creator deletes the game for
+  // everyone; a non-creator player just leaves it. Confirm before either - a swipe
+  // should never fire a bare instant delete.
+  const removeGame = async(g, mine)=>{
+    const msg = mine
+      ? "Delete this game for everyone? Players and progress go with it."
+      : "Leave this game? You can rejoin later with the join code.";
+    if(!window.confirm(msg)) return;
+    setGames(gs=>gs.filter(x=>x.code!==g.code));   // optimistic
+    try{ await Api.gameDelete(g.code); }catch(e){ setErr(e.message); }
   };
 
   return (
@@ -751,18 +797,21 @@ function Home({ store, onOpenGame, onSolo, go }){
             <div className="big">&#9633;</div>
             <p>No games yet. Start one from a puzzle below and invite your family.</p>
           </div>
-        ) : games.map(g=>(
-          <div key={g.code} className="item" onClick={()=>onOpenGame(g.code)}>
-            <div className="avatar" style={{background:colorFor(g.code)}}>{initials(g.title||"C")}</div>
-            <div className="grow">
-              <div className="t">{g.title || "Untitled puzzle"}</div>
-              <div className="byline">{g.constructor ? "by "+g.constructor+" - " : ""}{g.status}</div>
-            </div>
-            <span className="pill accent">{g.code}</span>
-            <button className="btn ghost sm" title="Remove" style={{color:"var(--muted)",padding:"4px 8px"}}
-              onClick={(e)=>{ e.stopPropagation(); removeGame(g.code); }}>&times;</button>
-          </div>
-        ))
+        ) : games.map(g=>{
+          const mine = !!(store.authUserId && g.created_by === store.authUserId);
+          return (
+            <SwipeRow key={g.code} label={mine ? "Delete" : "Leave"} onAction={()=>removeGame(g, mine)}>
+              <div className="item" onClick={()=>onOpenGame(g.code)}>
+                <div className="avatar" style={{background:colorFor(g.code)}}>{initials(g.title||"C")}</div>
+                <div className="grow">
+                  <div className="t">{g.title || "Untitled puzzle"}</div>
+                  <div className="byline">{g.constructor ? "by "+g.constructor+" - " : ""}{g.status}</div>
+                </div>
+                <span className="pill accent">{g.code}</span>
+              </div>
+            </SwipeRow>
+          );
+        })
       )}
 
       <div className="row" style={{justifyContent:"space-between",margin:"22px 2px 10px"}}>
@@ -925,6 +974,12 @@ function Friends({ store }){
   };
   const accept = async(id)=>{ try{ await Api.connectAccept(id); load(); }catch(e){ setErr(e.message); } };
   const remove = async(id)=>{ try{ await Api.connectRemove(id); load(); }catch(e){ setErr(e.message); } };
+  // Swipe-remove on an accepted buddy confirms first (no bare instant delete).
+  const removeBuddy = (c)=>{
+    const who = c.display_name || ("@"+(c.username||"?"));
+    if(!window.confirm("Remove "+who+" from your connections?")) return;
+    remove(c.id);
+  };
 
   if(needsHandle) return (
     <div>
@@ -972,8 +1027,11 @@ function Friends({ store }){
       <h2 style={{fontSize:18,margin:"16px 2px 8px"}}>Your crossword buddies</h2>
       {conn.connections.length===0 ? (
         <div className="empty"><div className="big">&#128101;</div><p>No connections yet. Add family by username above.</p></div>
-      ) : conn.connections.map(c=><Person key={c.id} c={c} action={
-        <button className="btn sm ghost" onClick={()=>remove(c.id)}>Remove</button>} />)}
+      ) : conn.connections.map(c=>(
+        <SwipeRow key={c.id} label="Remove" onAction={()=>removeBuddy(c)}>
+          <Person c={c} />
+        </SwipeRow>
+      ))}
 
       {conn.outgoing.length>0 && <>
         <h2 style={{fontSize:18,margin:"16px 2px 8px"}}>Pending</h2>
