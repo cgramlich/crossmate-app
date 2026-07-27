@@ -3,8 +3,10 @@
 Auto-read by Claude Code at session start. Keep it current.
 
 **Doc currency (starter spec section 5):** keep this file + the arch docs in step with the
-code in the SAME session; don't hardcode the version (it lives in `APP_VERSION`/`BUILD` in
-index.html); log dated changes in `CG Apps\Crossmate\Crossmate Log`.
+code in the SAME session; update the arch doc body when the architecture changes; don't
+hardcode the version (it lives in `APP_VERSION`/`BUILD` in index.html); write a DATED entry
+in `C:\Users\cjgra\Dropbox\My AI\CG Apps\Crossmate\Crossmate Log\` for EVERY work session.
+Rule: `CG Apps\Forever Apps\forever-apps-starter-spec.md` section 5.
 
 ## What this is
 Crossmate frontend: a single-file PWA (`index.html`, React 18 + Babel via CDN, no build step)
