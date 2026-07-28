@@ -219,8 +219,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.5.0";
-const BUILD = "2026-07-26.1";
+const APP_VERSION = "0.5.1";
+const BUILD = "2026-07-26.2";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -797,6 +797,8 @@ function Home({ store, onOpenGame, onSolo, go }){
   const [loading,setLoading] = useState(true);
   const [err,setErr] = useState("");
   const [picking,setPicking] = useState(false);
+  const [joinCode,setJoinCode] = useState("");
+  const [joining,setJoining] = useState(false);
 
   // Plain function + run-once-on-mount. NOTE: do NOT depend on `store` here - the
   // store object is a fresh reference every render, so a [store] dep would re-run
@@ -827,6 +829,19 @@ function Home({ store, onOpenGame, onSolo, go }){
     setGames(gs=>gs.filter(x=>x.code!==g.code));   // optimistic
     try{ await Api.gameDelete(g.code); }catch(e){ setErr(e.message); }
   };
+  // Redeem a join code someone shared. This is how a second player gets in
+  // without needing to be an accepted connection first (invite requires that).
+  const joinByCode = async()=>{
+    const code = joinCode.trim().toUpperCase();
+    if(!code) return;
+    setErr(""); setJoining(true);
+    try{
+      const r = await Api.gameJoin(code);
+      setJoinCode("");
+      onOpenGame(r.code);
+    }catch(e){ setErr(e.message); }
+    setJoining(false);
+  };
 
   return (
     <div>
@@ -855,6 +870,19 @@ function Home({ store, onOpenGame, onSolo, go }){
           );
         })
       )}
+
+      <div className="card" style={{marginTop:14}}>
+        <label className="lbl">Someone sent you a code?</label>
+        <div className="row">
+          <input className="field" style={{marginTop:0,letterSpacing:2,textTransform:"uppercase"}}
+            placeholder="join code" value={joinCode} maxLength={12}
+            onChange={e=>setJoinCode(e.target.value)}
+            onKeyDown={e=>{ if(e.key==="Enter") joinByCode(); }} />
+          <button className="btn sm primary" onClick={joinByCode} disabled={joining || !joinCode.trim()}>
+            {joining ? "..." : "Join"}
+          </button>
+        </div>
+      </div>
 
       <div className="row" style={{justifyContent:"space-between",margin:"22px 2px 10px"}}>
         <h2 style={{fontSize:20}}>Puzzle library</h2>
@@ -899,6 +927,7 @@ function CoopSolve({ code, store, onBack }){
   const [inviteU,setInviteU] = useState("");
   const [msg,setMsg] = useState("");
   const [invErr,setInvErr] = useState("");
+  const [copied,setCopied] = useState("");
   const pending = useRef({});                    // "r,c" -> letter awaiting confirm
 
   const applyServer = (d)=>{
@@ -941,6 +970,17 @@ function CoopSolve({ code, store, onBack }){
     catch(e){ setInvErr(e.message || "Could not send that invite. Try again."); }
   };
 
+  // Hand the code to someone: native share sheet where available, clipboard otherwise.
+  const shareCode = async()=>{
+    const text = "Solve this crossword with me on Crossmate - join code " + code
+      + "\nhttps://cgramlich.github.io/crossmate-app/";
+    try{
+      if(navigator.share){ await navigator.share({ text }); return; }
+      await navigator.clipboard.writeText(text);
+      setCopied("Copied"); setTimeout(()=>setCopied(""), 1600);
+    }catch(e){ /* user dismissed the share sheet - nothing to do */ }
+  };
+
   const players = (g && g.players) || [];
   const colorOf = {};
   players.forEach(p=>{ colorOf[p.user_id] = p.color || colorFor(p.user_id); });
@@ -978,7 +1018,10 @@ function CoopSolve({ code, store, onBack }){
 
             <div className="card" style={{marginBottom:10}}>
               <div className="byline">Join code - share this to invite anyone</div>
-              <div style={{fontSize:28,fontFamily:"Fraunces,serif",fontWeight:700,letterSpacing:3}}>{g.code}</div>
+              <div className="row" style={{justifyContent:"space-between"}}>
+                <div style={{fontSize:28,fontFamily:"Fraunces,serif",fontWeight:700,letterSpacing:3}}>{g.code}</div>
+                <button className="btn sm" onClick={shareCode}>{copied || "Share"}</button>
+              </div>
               <div className={"coop-live"+(live?"":" off")} style={{justifyContent:"flex-start",paddingLeft:0}}>
                 <i/>{live ? "Syncing with your crew" : "Offline - your letters save when you reconnect"}
               </div>
