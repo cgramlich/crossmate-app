@@ -176,6 +176,13 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 .xcell.wrong{color:var(--bad);}
 .xcell.wrong::after{content:"";position:absolute;top:2px;right:2px;width:0;height:0;border-top:9px solid var(--bad);border-left:9px solid transparent;}
 .xcell .n{position:absolute;top:2px;left:3px;font-size:9.5px;font-weight:700;color:var(--ink-2);line-height:1;}
+.xcell .who{position:absolute;bottom:2.5px;left:50%;transform:translateX(-50%);width:56%;height:3px;border-radius:2px;opacity:.9;}
+/* co-op info sheet over the grid */
+.coop-sheet{position:fixed;inset:0;z-index:59;background:rgba(20,18,12,.45);display:flex;align-items:flex-end;max-width:640px;margin:0 auto;}
+.coop-sheet .inner{background:var(--paper);width:100%;max-height:82%;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));}
+.coop-live{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);padding:5px 10px 0;justify-content:center;}
+.coop-live i{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block;}
+.coop-live.off i{background:var(--muted);}
 .cluebar{display:flex;align-items:center;gap:6px;padding:13px 8px;background:var(--surface);border-top:1px solid var(--line-2);box-shadow:0 -3px 12px rgba(20,18,12,.05);cursor:pointer;}
 .cluebar .cnum{font-weight:800;color:var(--accent);white-space:nowrap;font-size:15px;padding-left:4px;}
 .cluebar .ctext{flex:1;font-size:16px;min-width:0;font-weight:500;line-height:1.3;}
@@ -212,8 +219,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.4.0";
-const BUILD = "2026-07-24.2";
+const APP_VERSION = "0.5.0";
+const BUILD = "2026-07-26.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -327,6 +334,7 @@ const Api = {
   gameJoin:       (code) => api("/api/game/"+code+"/join", { method:"POST", body:{} }),
   gameInvite:     (code, username) => api("/api/game/"+code+"/invite", { method:"POST", body:{ username } }),
   gameDelete:     (code) => api("/api/game/"+code, { method:"DELETE" }),
+  gameFill:       (code, cells) => api("/api/game/"+code+"/fill", { method:"POST", body:{ cells } }),
 };
 
 /* ============================================================
@@ -572,7 +580,10 @@ function wordAt(model, r, c, dir){
    onFill - the grid itself doesn't care where fills live.
    ============================================================ */
 const KB_ROWS = ["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"];
-function Solver({ model, fill, onFill, title, subtitle, onBack }){
+// `authors` (optional) maps "r,c" -> a player color for letters someone ELSE
+// filled, so co-op play shows who did what. Omitted in solo. `onInfo` (optional)
+// adds an info button to the top bar (co-op: join code / players / invite).
+function Solver({ model, fill, onFill, title, subtitle, onBack, authors, onInfo }){
   const firstCell = ()=>{ for(const row of model.cells) for(const cell of row) if(!cell.block) return {r:cell.r,c:cell.c}; return {r:0,c:0}; };
   const [sel,setSel] = useState(firstCell);
   const [dir,setDir] = useState("A");
@@ -654,6 +665,7 @@ function Solver({ model, fill, onFill, title, subtitle, onBack }){
         <span className="ttl">{title}</span>
         <button className="btn sm" onClick={checkPuzzle}>Check</button>
         <button className="btn sm" onClick={revealWord}>Reveal</button>
+        {onInfo && <button className="iconbtn" style={{width:34,height:34,fontSize:14}} title="Game info" onClick={onInfo}>i</button>}
       </div>
 
       <div className="solver-mid">
@@ -662,9 +674,11 @@ function Solver({ model, fill, onFill, title, subtitle, onBack }){
             const k=key(cell.r,cell.c);
             if(cell.block) return <div key={k} className="xcell block" />;
             const cls = "xcell" + (inWord.has(k)?" hl":"") + ((sel.r===cell.r&&sel.c===cell.c)?" sel":"") + (wrong[k]?" wrong":"");
+            const who = authors && authors[k];   // color of the teammate who filled it
             return <div key={k} className={cls} onClick={()=>selectCell(cell.r,cell.c)}>
               {cell.num ? <span className="n">{cell.num}</span> : null}
               {fill[k]||""}
+              {who && <span className="who" style={{background:who}} />}
             </div>;
           })}
         </div>
@@ -865,21 +879,61 @@ function Home({ store, onOpenGame, onSolo, go }){
 }
 
 /* ============================================================
-   SOLVE - opens a game (Step 1: shows shared state; grid = Step 2)
+   CO-OP SOLVE (Step 2 Wave B) - the shared grid.
+   Same Solver as solo, but the fill map comes from the game's PER-CELL rows and
+   every keystroke POSTs to /api/game/{code}/fill. A poll pulls teammates' letters
+   back and tints each cell with the filler's color.
+   Optimistic: local writes render instantly and are held in `pending` until the
+   server confirms, so an in-flight poll can never revert what you just typed.
+   (When Realtime lands, only the polling swaps out - same rows, same shapes.)
    ============================================================ */
-function GameView({ code, store, onBack }){
+const COOP_POLL_MS = 5000;
+
+function CoopSolve({ code, store, onBack }){
   const [g,setG] = useState(null);
   const [err,setErr] = useState("");
+  const [fill,setFill] = useState({});
+  const [byUser,setByUser] = useState({});      // "r,c" -> user_id who filled it
+  const [live,setLive] = useState(true);
+  const [info,setInfo] = useState(false);
   const [inviteU,setInviteU] = useState("");
   const [msg,setMsg] = useState("");
   const [invErr,setInvErr] = useState("");
+  const pending = useRef({});                    // "r,c" -> letter awaiting confirm
+
+  const applyServer = (d)=>{
+    const f={}, b={};
+    (d.cells||[]).forEach(c=>{ const k=c.r+","+c.c; if(c.letter){ f[k]=c.letter; b[k]=c.by_user; } });
+    // unconfirmed local writes win, so a poll never clobbers what you just typed
+    Object.keys(pending.current).forEach(k=>{
+      const v = pending.current[k];
+      if(v){ f[k]=v; b[k]=store.authUserId; } else { delete f[k]; delete b[k]; }
+    });
+    setFill(f); setByUser(b); setG(d);
+  };
 
   const load = useCallback(async()=>{
-    setErr("");
-    try{ const d = await Api.gameGet(code); setG(d); }
-    catch(e){ setErr(e.message); }
+    try{ const d = await Api.gameGet(code); applyServer(d); setLive(true); setErr(""); }
+    catch(e){ setLive(false); setErr(e.message); }
   },[code]);
-  useEffect(()=>{ load(); },[load]);
+
+  useEffect(()=>{
+    load();
+    const iv = setInterval(load, COOP_POLL_MS);
+    const onVis = ()=>{ if(!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return ()=>{ clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  },[load]);
+
+  const onFill = (r,c,ch)=>{
+    const k = r+","+c;
+    pending.current[k] = ch;
+    setFill(f=>{ const n={...f}; if(ch) n[k]=ch; else delete n[k]; return n; });
+    setByUser(b=>({ ...b, [k]: store.authUserId }));
+    Api.gameFill(code, [{ r, c, letter: ch }])
+      .then(()=>{ if(pending.current[k]===ch) delete pending.current[k]; setLive(true); })
+      .catch(e=>{ log("ERROR","coop fill "+k+": "+e.message); setLive(false); });
+  };
 
   const invite = async()=>{
     setMsg(""); setInvErr("");
@@ -887,75 +941,79 @@ function GameView({ code, store, onBack }){
     catch(e){ setInvErr(e.message || "Could not send that invite. Try again."); }
   };
 
+  const players = (g && g.players) || [];
+  const colorOf = {};
+  players.forEach(p=>{ colorOf[p.user_id] = p.color || colorFor(p.user_id); });
+  // Tint only cells SOMEONE ELSE filled - your own letters read as normal ink.
+  const authors = {};
+  Object.keys(byUser).forEach(k=>{
+    const u = byUser[k];
+    if(u && u !== store.authUserId) authors[k] = colorOf[u] || colorFor(u);
+  });
+
+  const model = (g && g.puzzle) ? parsePuzzle(g.puzzle.data) : null;
   const isCreator = !!(g && store.authUserId && g.created_by === store.authUserId);
 
+  if(!model) return (
+    <div className="solver">
+      <div className="solver-top"><button className="btn ghost sm" onClick={onBack}>&larr; Back</button></div>
+      <div className="empty">{err || "Loading game..."}</div>
+    </div>
+  );
+
   return (
-    <div>
-      <button className="btn ghost sm" onClick={onBack}>&larr; All games</button>
-      <h1 className="screen-title" style={{marginTop:8}}>{g?.puzzle?.title || "Game"}</h1>
-      {err && <div className="banner warn">{err}</div>}
-      {!g ? <div className="empty">Loading...</div> : (
-        <div>
-          <div className="card">
-            <div className="row" style={{justifyContent:"space-between"}}>
-              <div>
-                <div className="byline">Join code</div>
-                <div style={{fontSize:26,fontFamily:"Fraunces,serif",fontWeight:700,letterSpacing:2}}>{g.code}</div>
-              </div>
-              <span className="pill accent">{g.status}</span>
+    <React.Fragment>
+      <Solver model={model} fill={fill} onFill={onFill} authors={authors}
+        title={g.puzzle.title || "Game"}
+        subtitle={g.puzzle.constructor ? "by "+g.puzzle.constructor : ""}
+        onBack={onBack} onInfo={()=>setInfo(true)} />
+
+      {info && (
+        <div className="coop-sheet" onClick={()=>setInfo(false)}>
+          <div className="inner" onClick={e=>e.stopPropagation()}>
+            <div className="row" style={{justifyContent:"space-between",marginBottom:10}}>
+              <h3 style={{fontSize:19}}>Playing together</h3>
+              <button className="btn ghost sm" onClick={()=>setInfo(false)}>Close</button>
             </div>
-            {g.puzzle?.constructor && <div className="byline" style={{marginTop:8}}>by {g.puzzle.constructor}</div>}
-          </div>
 
-          <div className="card" style={{textAlign:"center"}}>
-            <div className="grid-preview" style={{width:150}}>
-              <i/><i className="blk"/><i/><i/><i className="blk"/>
-              <i className="blk"/><i/><i/><i className="blk"/><i/>
-              <i/><i/><i className="blk"/><i/><i/>
-              <i/><i className="blk"/><i/><i/><i/>
-              <i className="blk"/><i/><i/><i className="blk"/><i/>
+            <div className="card" style={{marginBottom:10}}>
+              <div className="byline">Join code - share this to invite anyone</div>
+              <div style={{fontSize:28,fontFamily:"Fraunces,serif",fontWeight:700,letterSpacing:3}}>{g.code}</div>
+              <div className={"coop-live"+(live?"":" off")} style={{justifyContent:"flex-start",paddingLeft:0}}>
+                <i/>{live ? "Syncing with your crew" : "Offline - your letters save when you reconnect"}
+              </div>
             </div>
-            <p className="hint" style={{marginTop:14,marginBottom:0}}>
-              The solving grid arrives in Step 2. The shared state below is already live.
-            </p>
-          </div>
 
-          <div className="card">
-            <h3>Players ({(g.players||[]).length})</h3>
-            {(g.players||[]).map(p=>(
-              <div key={p.user_id} className="row" style={{margin:"8px 0"}}>
-                <div className="avatar" style={{width:28,height:28,fontSize:12,background:p.color||colorFor(p.user_id)}}>{initials(p.display)}</div>
-                <span>{p.display||"Player"}</span>
-              </div>
-            ))}
-            {isCreator ? (
-              <div className="row" style={{marginTop:10}}>
-                <input className="field" style={{marginTop:0}} placeholder="invite by username"
-                  value={inviteU} onChange={e=>setInviteU(e.target.value)} />
-                <button className="btn sm primary" onClick={invite} disabled={!inviteU.trim()}>Invite</button>
-              </div>
-            ) : (
-              <p className="hint" style={{marginTop:10,marginBottom:0}}>
-                Ask the game creator to invite players, or share the join code above.
-              </p>
-            )}
-            {isCreator && <p className="hint" style={{marginTop:8,marginBottom:0}}>
-              You can invite people from your Friends list (accepted connections).
-            </p>}
-            {msg && <div className="ok">{msg}</div>}
-            {invErr && <div className="banner warn" style={{marginTop:10,marginBottom:0}}>{invErr}</div>}
-          </div>
+            <div className="card" style={{marginBottom:10}}>
+              <h3>Players ({players.length})</h3>
+              {players.map(p=>(
+                <div key={p.user_id} className="row" style={{margin:"8px 0"}}>
+                  <div className="avatar" style={{width:28,height:28,fontSize:12,background:colorOf[p.user_id]}}>{initials(p.display)}</div>
+                  <span>{p.display||"Player"}{p.user_id===store.authUserId ? " (you)" : ""}</span>
+                </div>
+              ))}
+              {isCreator ? (
+                <div className="row" style={{marginTop:10}}>
+                  <input className="field" style={{marginTop:0}} placeholder="invite by username"
+                    value={inviteU} onChange={e=>setInviteU(e.target.value)} />
+                  <button className="btn sm primary" onClick={invite} disabled={!inviteU.trim()}>Invite</button>
+                </div>
+              ) : (
+                <p className="hint" style={{marginTop:10,marginBottom:0}}>
+                  Ask the game creator to invite players, or share the join code above.
+                </p>
+              )}
+              {msg && <div className="ok">{msg}</div>}
+              {invErr && <div className="banner warn" style={{marginTop:10,marginBottom:0}}>{invErr}</div>}
+            </div>
 
-          <div className="card">
-            <h3>Filled cells ({(g.cells||[]).length})</h3>
-            <p className="hint" style={{margin:0}}>
-              {(g.cells||[]).length===0 ? "Nothing filled yet - this is the shared per-cell state the grid will write to."
-                : "Shared fill is syncing per cell."}
+            <p className="hint" style={{textAlign:"center",margin:0}}>
+              A colored bar under a letter means a teammate filled it.
             </p>
           </div>
         </div>
       )}
-    </div>
+    </React.Fragment>
   );
 }
 
@@ -1219,7 +1277,7 @@ function App(){
           : <>
               {tab==="home"  && <Home store={store} onOpenGame={openGame} onSolo={setSoloId} go={setTab} />}
               {tab==="solve" && (openCode
-                ? <GameView code={openCode} store={store} onBack={()=>{ setOpenCode(null); setTab("home"); }} />
+                ? <CoopSolve code={openCode} store={store} onBack={()=>{ setOpenCode(null); setTab("home"); }} />
                 : <div className="empty" style={{marginTop:40}}><div className="big">&#9998;</div><p>Open a game from Home to solve.</p></div>)}
               {tab==="build"   && <Build />}
               {tab==="friends" && <Friends store={store} />}
