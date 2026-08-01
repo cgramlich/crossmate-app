@@ -31,8 +31,14 @@ check (NO service worker, matching the clean base). Parity build, NOT a store ta
 - **Auth:** email + password (Supabase `signInWithPassword`/`signUp`/`resetPasswordForEmail`).
 - **Home:** your games (`/api/game/mine`) + puzzle library (`/api/puzzles`); tap a puzzle to
   start a game.
-- **Solve (GameView):** opens a game (`/api/game/{code}`) - shows join code, roster, invite,
-  and the shared per-cell state. THE GRID ITSELF IS STEP 2 (placeholder preview for now).
+- **Solve:** `SoloSolve` (local-only, localStorage) and `CoopSolve` (the shared grid) both
+  render the same `Solver`. Co-op opens a game (`/api/game/{code}`), shows join code, roster
+  and invite in the info sheet, and POSTs every keystroke to `/api/game/{code}/fill`; a 5s
+  poll pulls teammates' letters back and tints their cells. Local writes are held in
+  `pending` so a poll can never revert what you just typed, and a fill that FAILS moves to
+  `outbox` and is retried (bounded backoff + a drain on the next successful poll). If the
+  backoff is spent the grid says so in a banner rather than diverging silently - never drop
+  a letter, never let one user's grid quietly disagree with everyone else's.
 - **Build:** placeholder for the builder (Step 2/3).
 - **Friends:** LIVE connections (add/accept/decline/remove) + requires a username.
 - **Settings (You):** profile (username/display), sign out, diagnostics log, version.
@@ -41,6 +47,11 @@ check (NO service worker, matching the clean base). Parity build, NOT a store ta
 - Supabase Auth (anon key, auth only). `authToken()` attaches the Bearer on every backend call.
 - `api()` generic fetch helper; `Api.*` domain calls; `collGet/collPut` for library/meta.
 - Update check: fetch own HTML, compare `BUILD`, offer reload banner (resume + 5-min interval).
+- CDN scripts are ALL pinned to an exact version with `integrity` + `crossorigin` (React,
+  ReactDOM, Babel, supabase-js). When bumping one, re-hash from the live bytes and pin the
+  PACKAGED file - for jsDelivr that means an explicit `dist/...` path, never the bare
+  `@ver` path, which it answers with a file it minifies on the fly (SRI must not be used
+  on generated files). No service worker here, so there is no cache list to keep in step.
 
 ## Owner working prefs
 Windows 11, ASCII-only in code/logs, explicit over clever, production-ready. Icons/branding

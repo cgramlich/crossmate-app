@@ -20,7 +20,14 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"
         integrity="sha384-1qlE7MZPM2pHD/pBZCU/yB8UCP52RYL8bge/qNdfNBCWToySp8/M+JL2waXU4hjJ"
         crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- supabase-js PINNED to 2.111.0 (was a floating "@2", which cannot carry an integrity hash).
+     Pin the packaged UMD file dist/umd/supabase.js - NOT the bare "@2.111.0" path: jsDelivr
+     answers that with a minified file it GENERATES on the fly, and its own header says not to
+     put SRI on dynamically generated files. Same version, same code, static bytes.
+     Defines the global `supabase` (supabase.createClient). Re-hash if this version ever moves. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0/dist/umd/supabase.js"
+        integrity="sha384-faMlYZUtkJj+Sh6Bmu/L0GzPcraRWN6CW+9RH3GUrK/Z0WS9tgaNNt0tHiLxsbdb"
+        crossorigin="anonymous"></script>
 <style>
 /* ============================================================
    THEME TOKENS - light "newsprint" crossword feel, indigo accent.
@@ -183,6 +190,11 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 .coop-live{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);padding:5px 10px 0;justify-content:center;}
 .coop-live i{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block;}
 .coop-live.off i{background:var(--muted);}
+/* letters the server still hasn't taken - say so plainly rather than diverge in silence */
+.coop-alert{display:flex;align-items:center;gap:10px;background:var(--warm);color:#fff;
+  font-size:13px;line-height:1.3;padding:9px 12px;}
+.coop-alert span{flex:1;}
+.coop-alert .btn{background:rgba(255,255,255,.92);border-color:transparent;color:var(--ink);flex:none;}
 .cluebar{display:flex;align-items:center;gap:6px;padding:13px 8px;background:var(--surface);border-top:1px solid var(--line-2);box-shadow:0 -3px 12px rgba(20,18,12,.05);cursor:pointer;}
 .cluebar .cnum{font-weight:800;color:var(--accent);white-space:nowrap;font-size:15px;padding-left:4px;}
 .cluebar .ctext{flex:1;font-size:16px;min-width:0;font-weight:500;line-height:1.3;}
@@ -219,8 +231,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.5.1";
-const BUILD = "2026-07-26.2";
+const APP_VERSION = "0.5.2";
+const BUILD = "2026-08-01.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -583,7 +595,7 @@ const KB_ROWS = ["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"];
 // `authors` (optional) maps "r,c" -> a player color for letters someone ELSE
 // filled, so co-op play shows who did what. Omitted in solo. `onInfo` (optional)
 // adds an info button to the top bar (co-op: join code / players / invite).
-function Solver({ model, fill, onFill, title, subtitle, onBack, authors, onInfo }){
+function Solver({ model, fill, onFill, title, subtitle, onBack, authors, onInfo, notice }){
   const firstCell = ()=>{ for(const row of model.cells) for(const cell of row) if(!cell.block) return {r:cell.r,c:cell.c}; return {r:0,c:0}; };
   const [sel,setSel] = useState(firstCell);
   const [dir,setDir] = useState("A");
@@ -667,6 +679,8 @@ function Solver({ model, fill, onFill, title, subtitle, onBack, authors, onInfo 
         <button className="btn sm" onClick={revealWord}>Reveal</button>
         {onInfo && <button className="iconbtn" style={{width:34,height:34,fontSize:14}} title="Game info" onClick={onInfo}>i</button>}
       </div>
+
+      {notice || null}
 
       <div className="solver-mid">
         <div className="xgrid" style={{gridTemplateColumns:"repeat("+model.W+",1fr)"}}>
@@ -914,8 +928,16 @@ function Home({ store, onOpenGame, onSolo, go }){
    Optimistic: local writes render instantly and are held in `pending` until the
    server confirms, so an in-flight poll can never revert what you just typed.
    (When Realtime lands, only the polling swaps out - same rows, same shapes.)
+
+   FAILED WRITES: a fill POST that errors used to be logged and dropped. The letter
+   stayed in `pending` so the typer kept seeing it, but teammates never did - silent
+   divergence in a SHARED grid. Now a failed cell moves to `outbox` and is re-sent:
+   a bounded backoff, plus a drain on every successful poll (a poll that lands proves
+   the connection is back). Nothing is ever dropped, and if the backoff runs out the
+   grid says so instead of quietly disagreeing with itself.
    ============================================================ */
 const COOP_POLL_MS = 5000;
+const COOP_RETRY_MS = [1500, 4000, 10000, 20000];   // bounded backoff, then say so out loud
 
 function CoopSolve({ code, store, onBack }){
   const [g,setG] = useState(null);
@@ -928,7 +950,13 @@ function CoopSolve({ code, store, onBack }){
   const [msg,setMsg] = useState("");
   const [invErr,setInvErr] = useState("");
   const [copied,setCopied] = useState("");
+  const [stranded,setStranded] = useState(0);    // letters the server still hasn't taken
   const pending = useRef({});                    // "r,c" -> letter awaiting confirm
+  const outbox  = useRef({});                    // "r,c" -> letter whose POST failed, must be re-sent
+  const tries   = useRef(0);                     // consecutive failed drains
+  const timer   = useRef(null);                  // backoff timer
+  const busy    = useRef(false);                 // a drain is already in flight
+  const flushRef = useRef(null);                 // latest drain fn, for timers/poll to call
 
   const applyServer = (d)=>{
     const f={}, b={};
@@ -941,8 +969,53 @@ function CoopSolve({ code, store, onBack }){
     setFill(f); setByUser(b); setG(d);
   };
 
+  /* ---- outbox: re-send letters the server refused, in one batch ----
+     `manual` = the user pressed Retry, so start the backoff over. Cells are only
+     cleared if the queued letter is still the one being retried, which keeps the
+     `pending.current[k]===ch` guard honest when a cell is retyped mid-flight. */
+  const drain = (manual)=>{
+    if(timer.current){ clearTimeout(timer.current); timer.current = null; }
+    const keys = Object.keys(outbox.current);
+    if(!keys.length){ tries.current = 0; busy.current = false; setStranded(0); return; }
+    if(busy.current) return;                        // poll and timer can both fire - one at a time
+    if(manual){ tries.current = 0; }
+    busy.current = true;
+    const cells = keys.map(k=>{ const p=k.split(","); return { r:+p[0], c:+p[1], letter: outbox.current[k] }; });
+    Api.gameFill(code, cells)
+      .then(()=>{
+        cells.forEach(cell=>{
+          const k = cell.r+","+cell.c;
+          if(outbox.current[k]===cell.letter)  delete outbox.current[k];
+          if(pending.current[k]===cell.letter) delete pending.current[k];
+        });
+        tries.current = 0; busy.current = false;
+        setStranded(Object.keys(outbox.current).length);
+        setLive(true);
+        log("SYNC","coop outbox drained ("+cells.length+" cell(s))");
+      })
+      .catch(e=>{
+        tries.current++; busy.current = false;
+        setLive(false);
+        log("ERROR","coop outbox drain "+tries.current+" failed: "+e.message);
+        if(tries.current < COOP_RETRY_MS.length) scheduleDrain();
+        else setStranded(Object.keys(outbox.current).length);
+        // backoff spent: stop the timer, keep the letters, and let the banner say so.
+        // The poll below still retries quietly whenever a GET lands.
+      });
+  };
+  const scheduleDrain = ()=>{
+    if(timer.current) return;                       // one timer drains the whole outbox
+    const wait = COOP_RETRY_MS[Math.min(tries.current, COOP_RETRY_MS.length-1)];
+    timer.current = setTimeout(()=>{ timer.current=null; if(flushRef.current) flushRef.current(); }, wait);
+  };
+  flushRef.current = drain;
+
   const load = useCallback(async()=>{
-    try{ const d = await Api.gameGet(code); applyServer(d); setLive(true); setErr(""); }
+    try{
+      const d = await Api.gameGet(code); applyServer(d); setLive(true); setErr("");
+      // a poll that lands proves we're reachable - push anything still stuck
+      if(Object.keys(outbox.current).length && flushRef.current) flushRef.current();
+    }
     catch(e){ setLive(false); setErr(e.message); }
   },[code]);
 
@@ -951,7 +1024,16 @@ function CoopSolve({ code, store, onBack }){
     const iv = setInterval(load, COOP_POLL_MS);
     const onVis = ()=>{ if(!document.hidden) load(); };
     document.addEventListener("visibilitychange", onVis);
-    return ()=>{ clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+    return ()=>{
+      clearInterval(iv); document.removeEventListener("visibilitychange", onVis);
+      if(timer.current) clearTimeout(timer.current);
+      // leaving with letters still queued: one last best-effort push before state dies
+      const left = Object.keys(outbox.current);
+      if(left.length){
+        const cells = left.map(k=>{ const p=k.split(","); return { r:+p[0], c:+p[1], letter: outbox.current[k] }; });
+        Api.gameFill(code, cells).catch(()=>{});
+      }
+    };
   },[load]);
 
   const onFill = (r,c,ch)=>{
@@ -960,8 +1042,19 @@ function CoopSolve({ code, store, onBack }){
     setFill(f=>{ const n={...f}; if(ch) n[k]=ch; else delete n[k]; return n; });
     setByUser(b=>({ ...b, [k]: store.authUserId }));
     Api.gameFill(code, [{ r, c, letter: ch }])
-      .then(()=>{ if(pending.current[k]===ch) delete pending.current[k]; setLive(true); })
-      .catch(e=>{ log("ERROR","coop fill "+k+": "+e.message); setLive(false); });
+      .then(()=>{
+        if(pending.current[k]===ch){ delete pending.current[k]; delete outbox.current[k]; }
+        setLive(true);
+        // this write got through, so anything queued probably will too
+        if(Object.keys(outbox.current).length) drain(true); else if(stranded) setStranded(0);
+      })
+      .catch(e=>{
+        log("ERROR","coop fill "+k+": "+e.message);
+        setLive(false);
+        // keep the letter AND queue it - the typer sees it, and so will everyone else
+        // the backoff stays quiet - the banner only appears once it is spent
+        if(pending.current[k]===ch){ outbox.current[k] = ch; scheduleDrain(); }
+      });
   };
 
   const invite = async()=>{
@@ -1006,7 +1099,13 @@ function CoopSolve({ code, store, onBack }){
       <Solver model={model} fill={fill} onFill={onFill} authors={authors}
         title={g.puzzle.title || "Game"}
         subtitle={g.puzzle.constructor ? "by "+g.puzzle.constructor : ""}
-        onBack={onBack} onInfo={()=>setInfo(true)} />
+        onBack={onBack} onInfo={()=>setInfo(true)}
+        notice={stranded ? (
+          <div className="coop-alert">
+            <span>{stranded===1 ? "1 letter hasn't reached your crew yet." : stranded+" letters haven't reached your crew yet."} They're safe on this device.</span>
+            <button className="btn sm" onClick={()=>drain(true)}>Retry</button>
+          </div>
+        ) : null} />
 
       {info && (
         <div className="coop-sheet" onClick={()=>setInfo(false)}>
