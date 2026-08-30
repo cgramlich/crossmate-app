@@ -117,30 +117,39 @@ attribution.** In the indie crossword world "free to solve" and "free to downloa
 near-universal and are **not** redistribution licences. So the content engine is **our own
 builder**, with per-constructor written permission and CC0/public-domain as top-ups.
 
-Rejected, and why:
+What follows is **our reading of publicly available terms as they stood on 2026-07-08**,
+recorded so the decision can be re-examined rather than re-litigated. It is not legal
+advice, and terms change — re-check before relying on any line of it.
 
-- **NYT** — no licensable API for a small third party; they dropped `.puz` export on
-  2021-08-10 and broke third-party access. Scraping violates both ToS and copyright.
-- **Syndication** (Universal/Andrews McMeel, Tribune/TCA, King Features, Newsday, WSJ) —
-  all all-rights-reserved, contract-only B2B, no free/attribution/non-commercial tier.
-  Over-budget and overkill for a free family app.
-- **Commissioning a constructor** — genuinely clean (work-for-hire, we own the rights,
-  NYT-close quality) at roughly **$75–250 per 15×15**, so about $750–2,000 for ten.
-  **Chris rejected this on cost, 2026-07-14.** Do not re-propose it as though it is new.
-- **Scraping Crosshare** — technically trivial (the `.puz` endpoint has no auth check) and
-  *not licensed*. Crosshare's **code** is AGPL-3.0; the **puzzles remain each
-  constructor's copyright**, and Crosshare gives constructors no CC/CC0 option. Technical
-  access is not a licence. Use Crosshare only to *find constructors to ask*.
-- **`xword-dl` / Crossword Scraper output** — the tool is open, but every puzzle it pulls
-  is publisher-copyrighted. Fine to solve privately, infringement to re-serve in a shared
-  app.
+Considered and set aside:
+
+- **NYT** — we found no licensable interface for a small third party, and `.puz` export was
+  discontinued on 2021-08-10, which broke third-party access. Scraping would sit against
+  both their terms and copyright.
+- **Syndication** (Universal/Andrews McMeel, Tribune/TCA, King Features, Newsday, WSJ) — as
+  far as we could establish, these license business-to-business by contract, and we found no
+  free, attribution-based or non-commercial tier. Out of proportion to a free family app in
+  any case.
+- **Commissioning a constructor** — genuinely clean (work-for-hire, we own the rights, and
+  the quality is there) at roughly **$75–250 per 15×15**, so about $750–2,000 for ten.
+  **Rejected on cost, 2026-07-14.** Do not re-propose it as though it is new.
+- **Crosshare** — its **code** is AGPL-3.0, but the **puzzles remain each constructor's
+  copyright**, and at the time of research the platform offered constructors no CC/CC0
+  option. So there is no blanket licence to reuse what is hosted there. **Technical access
+  is not a licence.** Use Crosshare to *find constructors to ask*, which is what it is good
+  for.
+- **`xword-dl` / Crossword Scraper output** — the tools are open, but the puzzles they
+  retrieve are publisher-copyrighted. Fine for solving privately; re-serving them inside a
+  shared app is redistribution.
 - **Tournament and charity packs** (Indie 500, Boswords, fundraiser packs) — access buys
-  solving rights only, and redistributing also undercuts the fundraiser.
+  solving rights; redistributing would also undercut the fundraiser those packs exist to
+  support.
 - **The `xd` corpus** — tooling is MIT, but the **puzzle data carries no explicit licence**
-  and its own README says research-only. The pre-1965 NYT grids are public domain by age
-  yet dated (Maleska-era), and Chris said he is not interested in old puzzles. Do **not**
-  build builder autofill from the modern `xd-clues` set.
-- **The Guardian's free API** — real, but contains **no crosswords** (articles only).
+  and its own README describes it as research-only. The pre-1965 NYT grids are public domain
+  by age yet read as dated (Maleska-era), and old puzzles were ruled out on taste
+  (2026-07-14). Do **not** build builder autofill from the modern `xd-clues` set.
+- **The Guardian's free API** — real and genuinely open, but it carries no crosswords
+  (articles only).
 
 Governing rule: **attribution does not cure infringement, and "small / private / free" is
 not fair use** for copying a whole puzzle. Private use lowers practical risk; it is not a
@@ -254,12 +263,25 @@ community menus, email.
 **Known gaps**
 
 - **The puzzle generator `fill2.js` is LOST.** It lived in a session scratchpad that has
-  since been cleared, and it produced the three demo minis. Rebuildable from the algorithm:
-  a 5×5 with black corners, filled row by row from a scored word list, pruning columns with
-  prefix sets built from that same list, rejecting any solution whose ten answers are not
-  all distinct. A seeded shuffle of the word list yields different grids per seed. Note that
-  excluding a high-connectivity hub word (ARGUE, in practice) made the search explode — keep
-  the full list and vary the seed instead.
+  since been cleared, and it produced the three demo minis. The algorithm: a 5×5 with black
+  corners, filled row by row from a scored word list, pruning columns with prefix sets built
+  from that same list, rejecting any solution whose ten answers are not all distinct. A
+  seeded shuffle of the word list yields different grids per seed. Excluding a
+  high-connectivity hub word (ARGUE, in practice) made the search explode — keep the full
+  list and vary the seed instead.
+
+  **Caveat, and it matters: the algorithm is recorded but the word list is not, and the word
+  list was the actual labour** — roughly 700 five-letter and 400 three-letter common words,
+  assembled by hand and inlined in the script. Anyone "just rebuilding from the algorithm"
+  will hit that wall immediately. Largely moot going forward, because the builder uses a
+  real scored wordlist (see Spread the Wordlist above), but it is the reason a rebuild is
+  not the fifteen-minute job it looks like.
+
+  **Decision, 2026-08-30: do not rebuild it.** It was a spike, not a component — fixed grid
+  shape, batch solve, tiny inline list — whereas the builder needs arbitrary grids,
+  incremental ranked suggestions, and the full wordlist. Rebuilding now means writing code
+  the builder will throw away. Revisit only if more demo puzzles are needed before the
+  builder ships.
 - No password-reset screen (see the email-confirmation decision).
 - Only three demo puzzles (`pz_demo_mini_1/2/3`, all `license: owned`, byline "Crossmate").
 - No app icons or manifest, so the home-screen icon is a generic placeholder.
