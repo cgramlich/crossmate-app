@@ -250,15 +250,32 @@ community menus, email.
 
 ## What is open
 
-**Blocked on Chris**
+**The approved order of work (decided 2026-08-30) — do these in sequence**
+
+1. **Set `ANTHROPIC_API_KEY` on Railway.** Owner's step: it is a secret and a dashboard
+   action. Confirm with `/health` reporting `ai: configured`.
+2. **Run the two-person co-op test.** Five minutes.
+3. **Then start the builder.**
+
+> **HARD GATE: do not start the builder until the API key is confirmed set.**
+> The grid editor and autofill need nothing new, but **clue-assist cannot be finished
+> without that key**, so starting early means stalling roughly two-thirds in, holding
+> half-finished work instead of sitting at a clean stopping point. This ordering exists
+> specifically to avoid discovering that mid-build.
+
+> **Why test before building, even though the two are independent:** it is not a code
+> dependency — different paths, neither can invalidate the other. It is that **a bug is far
+> easier to chase when the thing under test is the last thing that changed.** Once builder
+> work lands, that clean attribution is gone.
+
+**Blocked on the owner**
 
 - **The two-person co-op test has never been run.** Co-op is verified by harness and code
   review, **not** by two real accounts on the live deploy. A path needing no second person:
-  phone signed in as Chris, plus a laptop **incognito** window with a throwaway account,
-  join by code, type on both.
+  the phone signed in as the owner, plus a laptop **incognito** window with a throwaway
+  account, join by code, then type on both.
 - **`ANTHROPIC_API_KEY` is not set on Railway**, so the AI relay is inert (`/health` reports
-  `ai: not_configured`). The builder's clue-assist needs it. `DEBUG_KEY` is also unset, so
-  `/api/admin/debug` is disabled.
+  `ai: not_configured`). `DEBUG_KEY` is also unset, so `/api/admin/debug` is disabled.
 
 **Known gaps**
 
