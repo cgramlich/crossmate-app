@@ -6,7 +6,7 @@ without asking anyone and **without undoing something chosen on purpose.**
 Authoritative for the whole project (both repos). `crossmate-backend/HANDOFF.md`
 covers backend-only specifics and defers here for shared decisions.
 
-**Last updated: 2026-08-28.**
+**Last updated: 2026-09-05.**
 
 ---
 
@@ -252,16 +252,18 @@ community menus, email.
 
 **The approved order of work (decided 2026-08-30) — do these in sequence**
 
-1. **Set `ANTHROPIC_API_KEY` on Railway.** Owner's step: it is a secret and a dashboard
-   action. Confirm with `/health` reporting `ai: configured`.
-2. **Run the two-person co-op test.** Five minutes.
+1. ~~**Set `ANTHROPIC_API_KEY` on Railway.**~~ **DONE 2026-09-05** — verified by `/health`
+   reporting `ai: configured`. The gate below is cleared.
+2. **Run the two-person co-op test.** Five minutes. ← next
 3. **Then start the builder.**
 
-> **HARD GATE: do not start the builder until the API key is confirmed set.**
+> **GATE (now cleared, 2026-09-05): the builder needs `ANTHROPIC_API_KEY` set on Railway.**
 > The grid editor and autofill need nothing new, but **clue-assist cannot be finished
-> without that key**, so starting early means stalling roughly two-thirds in, holding
-> half-finished work instead of sitting at a clean stopping point. This ordering exists
-> specifically to avoid discovering that mid-build.
+> without that key**, so starting before it was set would have meant stalling roughly
+> two-thirds in, holding half-finished work. If `/health` ever reports `ai: not_configured`
+> again, the key has been lost and clue-assist is inert — check that before debugging the
+> feature. Note it is read at **startup**, so a newly added key needs the redeploy to finish
+> before `/health` reflects it.
 
 > **Why test before building, even though the two are independent:** it is not a code
 > dependency — different paths, neither can invalidate the other. It is that **a bug is far
@@ -274,8 +276,8 @@ community menus, email.
   review, **not** by two real accounts on the live deploy. A path needing no second person:
   the phone signed in as the owner, plus a laptop **incognito** window with a throwaway
   account, join by code, then type on both.
-- **`ANTHROPIC_API_KEY` is not set on Railway**, so the AI relay is inert (`/health` reports
-  `ai: not_configured`). `DEBUG_KEY` is also unset, so `/api/admin/debug` is disabled.
+- `DEBUG_KEY` is unset, so `/api/admin/debug` is disabled. (`ANTHROPIC_API_KEY` was set
+  2026-09-05; the AI relay is live.)
 
 **Known gaps**
 
