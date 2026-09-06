@@ -6,7 +6,7 @@ without asking anyone and **without undoing something chosen on purpose.**
 Authoritative for the whole project (both repos). `crossmate-backend/HANDOFF.md`
 covers backend-only specifics and defers here for shared decisions.
 
-**Last updated: 2026-09-05.**
+**Last updated: 2026-09-06.**
 
 ---
 
@@ -41,8 +41,12 @@ clue navigation, check / reveal, solved detection), co-op solving (shared grid, 
 sync, teammate colours, join codes, invites), friends/connections, profiles,
 swipe-to-delete, PWA update banner.
 
-**What does not exist yet:** the **builder** — the whole content engine. `Build` is a
-placeholder screen. There are exactly **3 demo puzzles**.
+**Builder (slice 1, 2026-09-06):** the Build tab now makes and saves real puzzles — grid
+shaping with mirroring and live numbering, answer filling, clue writing, then save to the
+library as ipuz with `license: owned` and your byline. **Autofill and AI clue-assist are
+not in it yet** (see the wordlist decision below).
+
+**Library content:** 3 demo minis plus anything built in-app.
 
 ---
 
@@ -254,8 +258,9 @@ community menus, email.
 
 1. ~~**Set `ANTHROPIC_API_KEY` on Railway.**~~ **DONE 2026-09-05** — verified by `/health`
    reporting `ai: configured`. The gate below is cleared.
-2. **Run the two-person co-op test.** Five minutes. ← next
-3. **Then start the builder.**
+2. **Run the two-person co-op test.** Five minutes. ← STILL OUTSTANDING (deferred by
+   preference on 2026-09-06, not by dependency; the builder was started first)
+3. ~~**Then start the builder.**~~ **Slice 1 shipped 2026-09-06** (make + save a puzzle).
 
 > **GATE (now cleared, 2026-09-05): the builder needs `ANTHROPIC_API_KEY` set on Railway.**
 > The grid editor and autofill need nothing new, but **clue-assist cannot be finished
@@ -309,9 +314,13 @@ community menus, email.
 
 **Parked / next**
 
-- **The builder** — the actual content engine and the next big build: grid editor (black
-  squares, symmetry, auto-numbering), scored autofill from Spread the Wordlist, one-tap AI
-  clue suggestions through the relay, save as ipuz into the library.
+- **Builder slice 2 — autofill.** Ranked suggestions from a scored wordlist as you type,
+  plus one-tap fill-the-rest. **Decide hosting before building:** the candidate list
+  (Spread the Wordlist, ~303K entries) is **CC BY-NC-SA**, so it is non-commercial and
+  share-alike. It belongs on the **backend** behind a pattern-query endpoint — the backend
+  repo is private, and that also keeps the list swappable if the app is ever monetised,
+  which the licence would then require. Do **not** ship it inside the public front-end repo.
+- **Builder slice 3 — AI clue-assist** through the relay. Unblocked: the key is set.
 - **Supabase Realtime** to replace the 5-second poll (live cursors, instant fill) — a drop-in
   on the same `cells` rows.
 
