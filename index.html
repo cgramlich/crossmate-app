@@ -231,8 +231,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.5.2";
-const BUILD = "2026-08-01.1";
+const APP_VERSION = "0.6.0";
+const BUILD = "2026-09-06.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -347,6 +347,9 @@ const Api = {
   gameInvite:     (code, username) => api("/api/game/"+code+"/invite", { method:"POST", body:{ username } }),
   gameDelete:     (code) => api("/api/game/"+code, { method:"DELETE" }),
   gameFill:       (code, cells) => api("/api/game/"+code+"/fill", { method:"POST", body:{ cells } }),
+  // Save a puzzle you built. The backend REFUSES anything without a license enum and a
+  // constructor byline (its cleanliness gate), so both are always sent explicitly.
+  puzzleCreate:   (p) => api("/api/puzzles", { method:"POST", body:p }),
 };
 
 /* ============================================================
@@ -1162,16 +1165,304 @@ function CoopSolve({ code, store, onBack }){
 /* ============================================================
    BUILD - placeholder for the builder (Step 2/3)
    ============================================================ */
-function Build(){
+/* ============================================================
+   BUILDER - make a puzzle and save it to the library.
+   Three steps: shape the grid, fill the answers, write the clues.
+
+   The builder never computes its own numbering. It assembles an ipuz object
+   and runs it through `parsePuzzle` - the SAME function the solver uses - and
+   reads the numbering and word list back off that model. One source of truth,
+   so a puzzle can never number differently in the builder than in the solver.
+   ============================================================ */
+const BUILD_SIZES = [
+  { n:5,  key:"mini",     label:"Mini 5x5" },
+  { n:7,  key:"midi",     label:"Midi 7x7" },
+  { n:11, key:"standard", label:"Standard 11x11" },
+];
+
+function buildIpuz({ n, blocks, letters, clues, title, author }){
+  const puzzle=[], solution=[];
+  for(let r=0;r<n;r++){
+    const pr=[], sr=[];
+    for(let c=0;c<n;c++){
+      const k=r+","+c;
+      if(blocks.has(k)){ pr.push("#"); sr.push("#"); }
+      else { pr.push(0); sr.push((letters[k]||"").toUpperCase()); }
+    }
+    puzzle.push(pr); solution.push(sr);
+  }
+  const draft = {
+    version:"http://ipuz.org/v2", kind:["http://ipuz.org/crossword#1"],
+    dimensions:{ width:n, height:n },
+    title: title || "Untitled", author: author || "",
+    puzzle, solution, clues:{ Across:[], Down:[] },
+  };
+  const model = parsePuzzle(draft);
+  if(model){
+    // Stamp the real clue numbers into the grid so OTHER ipuz readers (not just
+    // ours, which recomputes them) see a correctly numbered puzzle.
+    for(const row of model.cells) for(const cell of row){
+      if(!cell.block && cell.num) draft.puzzle[cell.r][cell.c] = cell.num;
+    }
+    draft.clues.Across = model.across.map(w => [w.num, clues["A-"+w.num] || ""]);
+    draft.clues.Down   = model.down.map(w   => [w.num, clues["D-"+w.num] || ""]);
+  }
+  return { ipuz: draft, model };
+}
+
+/* What still has to be true before this can be saved. Returned as a list so the
+   UI can show every problem at once rather than one-at-a-time whack-a-mole. */
+function builderProblems({ model, letters, clues, title, n, blocks }){
+  const out = [];
+  if(!(title||"").trim()) out.push("Give it a title.");
+  if(!model) return out.concat("That grid could not be read.");
+
+  const white = [];
+  for(const row of model.cells) for(const cell of row) if(!cell.block) white.push(cell);
+  if(white.length === 0) return out.concat("Every square is blacked out.");
+
+  const blank = white.filter(c => !(letters[c.r+","+c.c]||"").trim()).length;
+  if(blank) out.push(blank + " square" + (blank>1?"s":"") + " still empty.");
+
+  // A white square that belongs to no across AND no down entry is unreachable.
+  const inAny = new Set();
+  [...model.across, ...model.down].forEach(w => w.cells.forEach(cl => inAny.add(cl.r+","+cl.c)));
+  const orphan = white.filter(c => !inAny.has(c.r+","+c.c)).length;
+  if(orphan) out.push(orphan + " square" + (orphan>1?"s":"") + " not part of any word - black them out or open a neighbour.");
+
+  const words = [...model.across, ...model.down];
+  const noClue = words.filter(w => !((clues[(w.dir==="A"?"A-":"D-")+w.num]||"").trim())).length;
+  if(noClue) out.push(noClue + " clue" + (noClue>1?"s":"") + " still to write.");
+
+  return out;
+}
+
+function Builder({ store, toast, go }){
+  const [step,setStep]   = useState("grid");     // grid | fill | clues
+  const [n,setN]         = useState(5);
+  const [blocks,setBlocks] = useState(()=> new Set());
+  const [symmetry,setSym]  = useState(true);
+  const [letters,setLetters] = useState({});
+  const [clues,setClues]   = useState({});
+  const [title,setTitle]   = useState("");
+  const [sel,setSel]       = useState({r:0,c:0});
+  const [dir,setDir]       = useState("A");
+  const [saving,setSaving] = useState(false);
+  const [saved,setSaved]   = useState(null);
+  const [err,setErr]       = useState("");
+
+  const author = (store.profile && (store.profile.display_name || store.profile.username)) || "";
+  const sizeKey = (BUILD_SIZES.find(s=>s.n===n) || BUILD_SIZES[0]).key;
+  const { ipuz, model } = buildIpuz({ n, blocks, letters, clues, title, author });
+  const problems = builderProblems({ model, letters, clues, title, n, blocks });
+  const key = (r,c)=> r+","+c;
+
+  const resetGrid = (size)=>{ setN(size); setBlocks(new Set()); setLetters({}); setClues({}); setSel({r:0,c:0}); };
+
+  const toggleBlock = (r,c)=>{
+    setBlocks(prev=>{
+      const nx = new Set(prev);
+      const k = key(r,c), mk = key(n-1-r, n-1-c);
+      const on = nx.has(k);
+      if(on){ nx.delete(k); if(symmetry) nx.delete(mk); }
+      else { nx.add(k); if(symmetry) nx.add(mk); }
+      return nx;
+    });
+    // a blacked-out square cannot hold a letter
+    setLetters(prev=>{
+      const nx={...prev}; delete nx[key(r,c)];
+      if(symmetry) delete nx[key(n-1-r,n-1-c)];
+      return nx;
+    });
+  };
+
+  const curWord = model ? (wordAt(model, sel.r, sel.c, dir) || wordAt(model, sel.r, sel.c, dir==="A"?"D":"A")) : null;
+  const inWord = new Set((curWord?curWord.cells:[]).map(cl=>key(cl.r,cl.c)));
+
+  const selectCell = (r,c)=>{
+    if(blocks.has(key(r,c))) return;
+    if(sel.r===r && sel.c===c){ const o = dir==="A"?"D":"A"; if(model && wordAt(model,r,c,o)) setDir(o); }
+    else { setSel({r,c}); if(model && !wordAt(model,r,c,dir)){ const o=dir==="A"?"D":"A"; if(wordAt(model,r,c,o)) setDir(o); } }
+  };
+  const typeLetter = (ch)=>{
+    setLetters(prev=>({ ...prev, [key(sel.r,sel.c)]: ch }));
+    if(curWord){
+      const i = curWord.cells.findIndex(cl=>cl.r===sel.r && cl.c===sel.c);
+      if(i>=0 && i+1 < curWord.cells.length){ const cl=curWord.cells[i+1]; setSel({r:cl.r,c:cl.c}); }
+    }
+  };
+  const backspace = ()=>{
+    const k = key(sel.r,sel.c);
+    if(letters[k]) setLetters(prev=>{ const nx={...prev}; delete nx[k]; return nx; });
+    else if(curWord){
+      const i = curWord.cells.findIndex(cl=>cl.r===sel.r && cl.c===sel.c);
+      if(i>0){ const cl=curWord.cells[i-1]; setSel({r:cl.r,c:cl.c});
+        setLetters(prev=>{ const nx={...prev}; delete nx[key(cl.r,cl.c)]; return nx; }); }
+    }
+  };
+
+  // physical keyboard while filling (desktop); rebound each render for fresh closures
+  useEffect(()=>{
+    if(step!=="fill") return;
+    const h=(e)=>{
+      if(e.metaKey||e.ctrlKey||e.altKey) return;
+      if(e.key==="Backspace"){ e.preventDefault(); backspace(); }
+      else if(/^[a-zA-Z]$/.test(e.key)){ e.preventDefault(); typeLetter(e.key.toUpperCase()); }
+      else if(e.key===" "){ e.preventDefault(); const o=dir==="A"?"D":"A"; if(model && wordAt(model,sel.r,sel.c,o)) setDir(o); }
+    };
+    window.addEventListener("keydown", h);
+    return ()=>window.removeEventListener("keydown", h);
+  });
+
+  const save = async()=>{
+    setErr(""); setSaving(true);
+    try{
+      const r = await Api.puzzleCreate({
+        data: ipuz,
+        title: title.trim(),
+        constructor: author || "Unknown",   // backend REQUIRES a byline
+        license: "owned",                   // we made it, so we own it
+        size: sizeKey,
+        is_public: true,                    // visible in the family library
+      });
+      setSaved({ id: r.id, title: title.trim() });
+      toast && toast("Puzzle saved");
+    }catch(e){ setErr(e.message); }
+    setSaving(false);
+  };
+
+  const startAnother = ()=>{ setSaved(null); setTitle(""); resetGrid(n); setStep("grid"); };
+
+  if(saved) return (
+    <div>
+      <h1 className="screen-title">Saved</h1>
+      <div className="card">
+        <h3>{saved.title}</h3>
+        <p className="muted">It is in the puzzle library now. Anyone in the family can solve it,
+          or start a game and solve it together.</p>
+        <div className="row" style={{marginTop:12}}>
+          <button className="btn primary" onClick={()=>go("home")}>Go to the library</button>
+          <button className="btn" onClick={startAnother}>Build another</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const entries = model ? [...model.across, ...model.down] : [];
+  const answerOf = (w)=> w.cells.map(cl => letters[key(cl.r,cl.c)] || "·").join("");
+
   return (
     <div>
       <h1 className="screen-title">Build a puzzle</h1>
-      <div className="card">
-        <h3>The builder is coming next</h3>
-        <p className="muted">This is where the magic happens: design a grid, get smart fill
-          suggestions from an open wordlist, and one-tap AI clue help. Family puzzles made
-          for each other - the heart of Crossmate.</p>
-        <p className="hint">Planned: grid editor - Spread the Wordlist autofill - AI clue-assist - export to your library.</p>
+
+      <div className="seg" style={{marginBottom:14}}>
+        {[["grid","1. Grid"],["fill","2. Answers"],["clues","3. Clues"]].map(([k,label])=>(
+          <button key={k} className={step===k?"on":""} onClick={()=>setStep(k)}>{label}</button>
+        ))}
+      </div>
+
+      {err && <div className="banner warn">{err}</div>}
+
+      {step==="grid" && (
+        <div className="card">
+          <label className="lbl">Size</label>
+          <div className="row" style={{marginTop:6,marginBottom:12}}>
+            {BUILD_SIZES.map(s=>(
+              <button key={s.key} className={"btn sm"+(n===s.n?" primary":"")}
+                onClick={()=>{ if(n!==s.n && (blocks.size||Object.keys(letters).length) && !window.confirm("Changing size clears the grid. Continue?")) return; resetGrid(s.n); }}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <label className="lbl">
+            <input type="checkbox" checked={symmetry} onChange={e=>setSym(e.target.checked)} />
+            {" "}Mirror black squares (the usual crossword look)
+          </label>
+          <p className="hint" style={{marginTop:8}}>Tap a square to black it out.</p>
+        </div>
+      )}
+
+      {step==="clues" ? (
+        <div>
+          <div className="card">
+            <label className="lbl">Title</label>
+            <input className="field" value={title} maxLength={60}
+              onChange={e=>setTitle(e.target.value)} placeholder="e.g. Kitchen Table Mini" />
+            <p className="hint" style={{marginTop:8,marginBottom:0}}>
+              Saved as yours, credited to {author || "your profile name"}.
+            </p>
+          </div>
+          {["A","D"].map(d=>{
+            const list = d==="A" ? (model?model.across:[]) : (model?model.down:[]);
+            if(!list.length) return null;
+            return (
+              <div className="card" key={d}>
+                <h3>{d==="A" ? "Across" : "Down"}</h3>
+                {list.map(w=>(
+                  <div key={d+w.num} style={{marginBottom:10}}>
+                    <label className="lbl">{w.num} &middot; <span style={{letterSpacing:2}}>{answerOf(w)}</span></label>
+                    <input className="field" value={clues[d+"-"+w.num]||""} maxLength={120}
+                      placeholder="clue"
+                      onChange={e=>setClues(prev=>({ ...prev, [d+"-"+w.num]: e.target.value }))} />
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="xgrid" style={{gridTemplateColumns:"repeat("+n+",1fr)", marginBottom:14}}>
+          {Array.from({length:n*n}).map((_,i)=>{
+            const r = Math.floor(i/n), c = i%n, k = key(r,c);
+            if(blocks.has(k)) return <div key={k} className="xcell block"
+              onClick={()=> step==="grid" && toggleBlock(r,c)} />;
+            const cell = model ? model.cells[r][c] : null;
+            const cls = "xcell"
+              + (step==="fill" && inWord.has(k) ? " hl" : "")
+              + (step==="fill" && sel.r===r && sel.c===c ? " sel" : "");
+            return (
+              <div key={k} className={cls}
+                onClick={()=> step==="grid" ? toggleBlock(r,c) : selectCell(r,c)}>
+                {cell && cell.num ? <span className="n">{cell.num}</span> : null}
+                {letters[k]||""}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {step==="fill" && (
+        <div>
+          <div className="cluebar" style={{borderRadius:10,marginBottom:8}}>
+            <span className="cnum">{curWord ? curWord.num + (curWord.dir==="A"?"A":"D") : "-"}</span>
+            <span className="ctext">{curWord ? answerOf(curWord) : "Tap a square to start"}</span>
+          </div>
+          <div className="kbd" style={{borderRadius:12}}>
+            {KB_ROWS.map((row,i)=>(
+              <div className="kbd-row" key={i}>
+                {row.split("").map(ch=><button key={ch} className="kbd-key" onClick={()=>typeLetter(ch)}>{ch}</button>)}
+                {i===2 && <button className="kbd-key wide" onClick={backspace}>&#9003;</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{marginTop:14}}>
+        {problems.length === 0 ? (
+          <p className="ok" style={{marginTop:0}}>Ready to save.</p>
+        ) : (
+          <div>
+            <div className="byline" style={{marginBottom:6}}>Before you can save:</div>
+            <ul style={{margin:"0 0 4px 18px",padding:0,color:"var(--ink-2)",fontSize:14}}>
+              {problems.map((p,i)=><li key={i} style={{marginBottom:3}}>{p}</li>)}
+            </ul>
+          </div>
+        )}
+        <button className="btn primary block" style={{marginTop:10}}
+          disabled={saving || problems.length>0} onClick={save}>
+          {saving ? "Saving..." : "Save to the library"}
+        </button>
       </div>
     </div>
   );
@@ -1421,7 +1712,7 @@ function App(){
               {tab==="solve" && (openCode
                 ? <CoopSolve code={openCode} store={store} onBack={()=>{ setOpenCode(null); setTab("home"); }} />
                 : <div className="empty" style={{marginTop:40}}><div className="big">&#9998;</div><p>Open a game from Home to solve.</p></div>)}
-              {tab==="build"   && <Build />}
+              {tab==="build"   && <Builder store={store} toast={toast} go={setTab} />}
               {tab==="friends" && <Friends store={store} />}
             </>}
       </div>
