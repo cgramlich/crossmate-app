@@ -231,8 +231,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.6.0";
-const BUILD = "2026-09-06.1";
+const APP_VERSION = "0.7.0";
+const BUILD = "2026-09-28.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -350,6 +350,26 @@ const Api = {
   // Save a puzzle you built. The backend REFUSES anything without a license enum and a
   // constructor byline (its cleanliness gate), so both are always sent explicitly.
   puzzleCreate:   (p) => api("/api/puzzles", { method:"POST", body:p }),
+  // Builder help. The word list itself lives on the server - see the note in the
+  // backend - so the app only ever asks "what fits this pattern".
+  wordsSuggest:   (pattern, limit) => api("/api/words/suggest?pattern="+encodeURIComponent(pattern)+"&limit="+(limit||25)),
+  wordsFill:      (width, height, blocks, letters) =>
+                    api("/api/words/fill", { method:"POST", body:{ width, height, blocks, letters } }),
+  // Clue suggestions ride the existing AI relay. The SERVER picks the model from
+  // the task label, so the model named here is advisory only.
+  aiClues:        (answer, existingClues) => api("/api/ai/relay", { method:"POST", body:{
+                    task: "clue", model: "claude-sonnet-5-5", max_tokens: 400,
+                    system: "You write crossword clues for a family puzzle app. Given an ANSWER, "
+                          + "reply with exactly 3 clue options, one per line, no numbering, no quotes, "
+                          + "no extra commentary. Keep each under 60 characters. Make them fair and "
+                          + "solvable, not obscure. Never include the answer word itself in a clue.",
+                    messages: [{ role:"user", content:
+                      "ANSWER: " + answer
+                      + (existingClues && existingClues.length
+                          ? "\n\nClues already used in this puzzle (do not repeat their style verbatim):\n"
+                            + existingClues.slice(0,8).join("\n")
+                          : "") }],
+                  }}),
 };
 
 /* ============================================================
@@ -1250,6 +1270,11 @@ function Builder({ store, toast, go }){
   const [saving,setSaving] = useState(false);
   const [saved,setSaved]   = useState(null);
   const [err,setErr]       = useState("");
+  const [sugg,setSugg]     = useState([]);        // words that fit the selected entry
+  const [suggBusy,setSuggBusy] = useState(false);
+  const [filling,setFilling]   = useState(false); // "fill the rest" in flight
+  const [clueBusy,setClueBusy] = useState("");    // which entry is asking for clues
+  const [clueOpts,setClueOpts] = useState({});    // "A-4" -> [clue, clue, clue]
 
   const author = (store.profile && (store.profile.display_name || store.profile.username)) || "";
   const sizeKey = (BUILD_SIZES.find(s=>s.n===n) || BUILD_SIZES[0]).key;
@@ -1313,6 +1338,64 @@ function Builder({ store, toast, go }){
     window.addEventListener("keydown", h);
     return ()=>window.removeEventListener("keydown", h);
   });
+
+  // --- Builder help -------------------------------------------------------
+  // Suggestions follow the selected entry. Debounced because every keystroke
+  // changes the pattern and we do not want a request per letter.
+  const patternOf = (w)=> w ? w.cells.map(cl => letters[key(cl.r,cl.c)] || "?").join("") : "";
+  const curPattern = patternOf(curWord);
+  useEffect(()=>{
+    if(step!=="fill" || !curWord || !curPattern.includes("?")){ setSugg([]); return; }
+    let live = true;
+    setSuggBusy(true);
+    const t = setTimeout(async()=>{
+      try{ const r = await Api.wordsSuggest(curPattern, 24); if(live) setSugg(r.words||[]); }
+      catch(e){ if(live) setSugg([]); }
+      if(live) setSuggBusy(false);
+    }, 250);
+    return ()=>{ live = false; clearTimeout(t); setSuggBusy(false); };
+  },[step, curPattern]);
+
+  const placeWord = (word)=>{
+    if(!curWord) return;
+    setLetters(prev=>{
+      const nx = {...prev};
+      curWord.cells.forEach((cl,i)=>{ nx[key(cl.r,cl.c)] = word[i]; });
+      return nx;
+    });
+  };
+
+  const fillRest = async()=>{
+    setErr(""); setFilling(true);
+    try{
+      const blockList = [...blocks].map(k => k.split(",").map(Number));
+      const r = await Api.wordsFill(n, n, blockList, letters);
+      if(r.solved){ setLetters(r.letters || {}); }
+      else {
+        // Say which kind of failure it was - "add more black squares" is real
+        // advice for no_fill, and useless advice for a timeout.
+        setErr(r.reason === "timeout"
+          ? "That grid is taking too long to fill. Try a few more black squares, or fill a word or two yourself first."
+          : "No filling of that grid works with the words available. Try changing a letter or adding a black square.");
+      }
+    }catch(e){ setErr(e.message); }
+    setFilling(false);
+  };
+
+  const askClues = async(dir, w)=>{
+    const id = dir+"-"+w.num;
+    const answer = w.cells.map(cl => letters[key(cl.r,cl.c)] || "").join("");
+    if(answer.length !== w.cells.length) return;     // only once the answer is complete
+    setClueBusy(id); setErr("");
+    try{
+      const r = await Api.aiClues(answer, Object.values(clues).filter(Boolean));
+      const text = (r.content||[]).map(b=>b.text||"").join("\n");
+      const opts = text.split("\n").map(s=>s.replace(/^[\s\-*\d.)]+/, "").trim())
+                       .filter(Boolean).slice(0,3);
+      setClueOpts(prev=>({ ...prev, [id]: opts }));
+    }catch(e){ setErr(e.message); }
+    setClueBusy("");
+  };
 
   const save = async()=>{
     setErr(""); setSaving(true);
@@ -1398,14 +1481,37 @@ function Builder({ store, toast, go }){
             return (
               <div className="card" key={d}>
                 <h3>{d==="A" ? "Across" : "Down"}</h3>
-                {list.map(w=>(
-                  <div key={d+w.num} style={{marginBottom:10}}>
-                    <label className="lbl">{w.num} &middot; <span style={{letterSpacing:2}}>{answerOf(w)}</span></label>
-                    <input className="field" value={clues[d+"-"+w.num]||""} maxLength={120}
-                      placeholder="clue"
-                      onChange={e=>setClues(prev=>({ ...prev, [d+"-"+w.num]: e.target.value }))} />
-                  </div>
-                ))}
+                {list.map(w=>{
+                  const id = d+"-"+w.num;
+                  const answer = answerOf(w);
+                  const ready = !answer.includes("·");   // every square filled
+                  return (
+                    <div key={id} style={{marginBottom:12}}>
+                      <div className="row" style={{justifyContent:"space-between"}}>
+                        <label className="lbl">{w.num} &middot; <span style={{letterSpacing:2}}>{answer}</span></label>
+                        <button className="btn ghost sm" disabled={!ready || clueBusy===id}
+                          title={ready ? "Suggest clues" : "Fill this answer in first"}
+                          onClick={()=>askClues(d, w)}>
+                          {clueBusy===id ? "Thinking..." : "Suggest"}
+                        </button>
+                      </div>
+                      <input className="field" value={clues[id]||""} maxLength={120}
+                        placeholder="clue"
+                        onChange={e=>setClues(prev=>({ ...prev, [id]: e.target.value }))} />
+                      {(clueOpts[id]||[]).length > 0 && (
+                        <div style={{marginTop:6,display:"flex",flexDirection:"column",gap:4}}>
+                          {clueOpts[id].map((c,i)=>(
+                            <button key={i} className="btn sm" style={{justifyContent:"flex-start",textAlign:"left"}}
+                              onClick={()=>{ setClues(prev=>({ ...prev, [id]: c }));
+                                             setClueOpts(prev=>({ ...prev, [id]: [] })); }}>
+                              {c}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -1433,10 +1539,36 @@ function Builder({ store, toast, go }){
 
       {step==="fill" && (
         <div>
+          <div className="row" style={{marginBottom:8}}>
+            <button className="btn primary" style={{flex:1}} disabled={filling} onClick={fillRest}>
+              {filling ? "Filling..." : "Fill the rest for me"}
+            </button>
+            <button className="btn" disabled={!Object.keys(letters).length}
+              onClick={()=>{ if(window.confirm("Clear every letter? The grid shape stays.")) setLetters({}); }}>
+              Clear
+            </button>
+          </div>
+
           <div className="cluebar" style={{borderRadius:10,marginBottom:8}}>
             <span className="cnum">{curWord ? curWord.num + (curWord.dir==="A"?"A":"D") : "-"}</span>
             <span className="ctext">{curWord ? answerOf(curWord) : "Tap a square to start"}</span>
           </div>
+
+          {curWord && curPattern.includes("?") && (
+            <div className="card" style={{padding:"10px 12px",marginBottom:8}}>
+              <div className="byline" style={{marginBottom:6}}>
+                {suggBusy ? "Finding words..."
+                  : sugg.length ? "Words that fit - tap to use"
+                  : "No word fits those letters"}
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {sugg.map(s=>(
+                  <button key={s.word} className="btn sm" style={{letterSpacing:1}}
+                    onClick={()=>placeWord(s.word)}>{s.word}</button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="kbd" style={{borderRadius:12}}>
             {KB_ROWS.map((row,i)=>(
               <div className="kbd-row" key={i}>

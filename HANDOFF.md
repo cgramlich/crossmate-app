@@ -23,15 +23,15 @@ feature.
 
 ---
 
-## Current state (2026-08-28)
+## Current state (2026-09-28)
 
 | | Version | Where |
 |---|---|---|
-| Front end | `APP_VERSION` 0.5.2, `BUILD` 2026-08-01.1 | https://cgramlich.github.io/crossmate-app/ |
-| Backend | 0.2.3 | Railway (host is `API_BASE` in `index.html`) |
+| Front end | `APP_VERSION` 0.7.0, `BUILD` 2026-09-28.1 | https://cgramlich.github.io/crossmate-app/ |
+| Backend | 0.3.1 | Railway (host is `API_BASE` in `index.html`) |
 
-Both repos clean and in sync with `origin/master`. Backend health green, `db: connected`.
-Last functional change 2026-08-01; the month since has been portfolio-standard sweeps.
+Both repos clean and in sync with `origin/master`. Backend health green, `db: connected`,
+`ai: configured`. Last functional change 2026-09-28 (builder assists).
 
 **Do not copy these version numbers anywhere.** Read `APP_VERSION`/`BUILD` in
 `index.html` and the backend `/health` payload — a pasted version is stale on paste.
@@ -41,10 +41,12 @@ clue navigation, check / reveal, solved detection), co-op solving (shared grid, 
 sync, teammate colours, join codes, invites), friends/connections, profiles,
 swipe-to-delete, PWA update banner.
 
-**Builder (slice 1, 2026-09-06):** the Build tab now makes and saves real puzzles — grid
-shaping with mirroring and live numbering, answer filling, clue writing, then save to the
-library as ipuz with `license: owned` and your byline. **Autofill and AI clue-assist are
-not in it yet** (see the wordlist decision below).
+**Builder (2026-09-28):** the Build tab makes and saves real puzzles — grid shaping with
+mirroring and live numbering, answer filling, clue writing, then save to the library as
+ipuz with `license: owned` and your byline. It now does the hard part for you: **word
+suggestions** that follow the selected entry, **"fill the rest for me"** for the whole
+grid, and **three AI clue options per answer**. Answers come from a word list on the
+backend (`/api/words/*`); clues come through the existing AI relay.
 
 **Library content:** 3 demo minis plus anything built in-app.
 
@@ -173,18 +175,43 @@ puzzle eventually lands in the library.
   trivial to parse, and it maps straight onto the JSONB `puzzles.data` column. **`.puz`**
   (Across Lite) is **import-only** — binary and reverse-engineered with no official spec,
   but it is the format most real-world puzzles arrive in.
-- **Spread the Wordlist** (spreadthewordlist.com) — the intended builder autofill list,
-  roughly 303K entries scored 0–60. **Licence: CC BY-NC-SA** — non-commercial, attribution,
-  share-alike. It is acceptable **because Crossmate is free and not sold**; **if the app
-  ever monetises, this wordlist must be swapped out.** Non-NC alternatives for that day:
-  **Peter Broda's list** (~427K, released free for community use) or
-  **`gregpoulos/crossword-owl`** (explicitly open).
+- **The answer word list is `gregpoulos/crossword-owl` (CC BY 4.0)** — see the dated
+  decision below. **Spread the Wordlist** (~303K entries, CC BY-NC-SA) was the earlier
+  intent and was **rejected**: non-commercial and share-alike would have to be unpicked
+  the day Crossmate charged for anything, and share-alike reaches further than a word list.
 - **Exet** (`viresh-ratnakar/exet`, **MIT**) — a browser crossword constructor; reuse its
   autofill approach rather than writing a solver from scratch.
 - **Exolve** (**MIT**) and **Crossword Nexus's solver** (**BSD-3**) are the acceptable open
   solver/renderers.
 - **Crosshare's code is AGPL-3.0 — do not reuse it.** This also matches the standing
   portfolio hard rule: no AGPL in a Forever App.
+
+### The answer word list is crossword-owl, minus one of its files (2026-09-28)
+
+Chris asked whether there was something cheap or royalty-free to license rather
+than paying per puzzle. There is, and it costs nothing: **`gregpoulos/crossword-owl`,
+CC BY 4.0** — attribution only, commercial use allowed, no share-alike. Two of its
+three files are in `crossmate-backend/wordlists/`:
+
+| File | Rows | Licence |
+|---|---|---|
+| `wordnet-scrabble.owl` | 86,555 | Princeton WordNet 3.0 — permissive, commercial use allowed |
+| `common.owl` | 5,000 | public domain (Michael Wehar) |
+
+**`broda.owl` was deliberately not downloaded.** It sits inside that CC-BY-4.0
+repository, but it is third-party data: Peter Broda's own site never states
+commercial-use terms, and when checked its certificate had expired, so the terms
+could not be read at all. **A repository's licence does not launder a file that
+repository did not author.** If the bigger list is ever wanted, ask Broda directly.
+
+The road not taken: **Spread the Wordlist** is larger and better scored, but
+CC BY-NC-SA. "Free today" is not a licence, and unpicking a share-alike word list
+out of a shipped app later is far worse than having a smaller one now.
+
+It lives on the **backend**, not in the public front-end repo — the front end sends a
+pattern and gets words back, so the list stays swappable and is never shipped to a
+browser. The API returns the attribution string with every response, so the credit
+travels with the data instead of living in a comment someone deletes.
 
 ### The shared fill is one row per cell (2026-07-07, paid off 2026-07-26)
 
@@ -260,7 +287,9 @@ community menus, email.
    reporting `ai: configured`. The gate below is cleared.
 2. **Run the two-person co-op test.** Five minutes. ← STILL OUTSTANDING (deferred by
    preference on 2026-09-06, not by dependency; the builder was started first)
-3. ~~**Then start the builder.**~~ **Slice 1 shipped 2026-09-06** (make + save a puzzle).
+3. ~~**Then start the builder.**~~ **Slice 1 shipped 2026-09-06** (make + save a puzzle);
+   **assists shipped 2026-09-28** (word suggestions, fill-the-rest, AI clue options).
+   Chris tries it end to end, then item 2 above.
 
 > **GATE (now cleared, 2026-09-05): the builder needs `ANTHROPIC_API_KEY` set on Railway.**
 > The grid editor and autofill need nothing new, but **clue-assist cannot be finished
@@ -314,13 +343,12 @@ community menus, email.
 
 **Parked / next**
 
-- **Builder slice 2 — autofill.** Ranked suggestions from a scored wordlist as you type,
-  plus one-tap fill-the-rest. **Decide hosting before building:** the candidate list
-  (Spread the Wordlist, ~303K entries) is **CC BY-NC-SA**, so it is non-commercial and
-  share-alike. It belongs on the **backend** behind a pattern-query endpoint — the backend
-  repo is private, and that also keeps the list swappable if the app is ever monetised,
-  which the licence would then require. Do **not** ship it inside the public front-end repo.
-- **Builder slice 3 — AI clue-assist** through the relay. Unblocked: the key is set.
+- ~~**Builder slice 2 — autofill.**~~ **Shipped 2026-09-28.**
+- ~~**Builder slice 3 — AI clue-assist.**~~ **Shipped 2026-09-28.**
+- **Better answers, not just legal ones.** The current list is scored, but the fill takes
+  the first thing that works. A fill that reads well (common words first, obscurity only
+  where the grid forces it) is a scoring problem, not a solver problem — worth doing once
+  Chris has built a few puzzles and can say what reads badly.
 - **Supabase Realtime** to replace the 5-second poll (live cursors, instant fill) — a drop-in
   on the same `cells` rows.
 

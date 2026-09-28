@@ -60,16 +60,19 @@ made for the people you are playing with.
 | Backend, front end, cloud stood up | 2 days | backend 2026-07-12, front end and live deploy 2026-07-13 |
 | Solo solving grid shipped | 2026-07-14 | project logs |
 | Shared co-op solving shipped | 2026-07-26 | project logs |
-| Front end size | one HTML file, ~1,100 lines of application code, **no build step** | source, 2026-08-28 |
+| Front end size | one HTML file, ~1,650 lines of application code, **no build step** | source, 2026-09-28 |
 | Database tables | 11, all with row-level security enabled | schema, 2026-07-14 |
 | Shared-grid sync interval | 5 seconds (poll), with optimistic local writes | source, 2026-07-26 |
 | Failed-sync retry schedule | 4 bounded attempts: 1.5s, 4s, 10s, 20s, then quiet retry on each successful poll | 2026-08-01 |
 | Research breadth | 6 parallel source-category investigations, licences verified against primary sources | 2026-07-08 |
 | Cost of the rejected option | ~$75–250 per commissioned 15×15 puzzle, ~$750–2,000 for ten | 2026-07-08 research |
 | Date NYT dropped third-party export | 2021-08-10 | primary source, 2026-07-08 research |
-| Candidate autofill wordlist | ~303,000 entries, scored 0–60, licence **CC BY-NC-SA** | Spread the Wordlist, verified 2026-07-13 |
+| Answer word list shipped | 91,555 entries, licence **CC BY 4.0** (attribution only) | crossword-owl, verified at source 2026-09-28 |
+| Wordlist rejected on licence | ~303,000 entries, **CC BY-NC-SA** — non-commercial, share-alike | Spread the Wordlist, verified 2026-07-13 |
+| Time to fill an empty 5×5 grid | 0.25s, after two fixes; it timed out before them | measured 2026-09-28 |
 | Cold-start latency before mitigation | ~40s first request after idle, ~1s once warm | measured 2026-07-14 |
 | Puzzles in the library today | 3 (all originals, licence "owned") | 2026-08-28 |
+| Clue options offered per answer | 3, written on request through the AI relay | 2026-09-28 |
 
 *Note: the three demo puzzles are 5×5 minis generated in-house specifically so that no
 third-party content was ever required to demonstrate the app.*
@@ -90,6 +93,11 @@ third-party content was ever required to demonstrate the app.*
 - "The safest content we can possibly ship is the puzzle you made for the person you are
   playing with."
 - "Technical access is not a licence."
+- "A repository's licence does not launder a file that repository did not author. One of
+  the three word-list files was left on the shelf for exactly that reason."
+- "The builder's no-duplicate-answers rule was applied one square too widely, and the
+  symptom was not a wrong answer - it was the whole thing hanging. Correctness bugs do not
+  always look like wrong output."
 - "Three weeks from empty repository to two people solving the same grid on two phones."
 
 ---
