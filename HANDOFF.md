@@ -23,15 +23,16 @@ feature.
 
 ---
 
-## Current state (2026-09-28)
+## Current state (2026-11-03)
 
 | | Version | Where |
 |---|---|---|
-| Front end | `APP_VERSION` 0.7.0, `BUILD` 2026-09-28.1 | https://cgramlich.github.io/crossmate-app/ |
+| Front end | `APP_VERSION` 0.7.1, `BUILD` 2026-11-03.1 | https://cgramlich.github.io/crossmate-app/ |
 | Backend | 0.3.1 | Railway (host is `API_BASE` in `index.html`) |
 
 Both repos clean and in sync with `origin/master`. Backend health green, `db: connected`,
-`ai: configured`. Last functional change 2026-09-28 (builder assists).
+`ai: configured`. Last functional change 2026-09-28 (builder assists); last release
+2026-11-03 (the Supabase publishable-key fix below, no feature change).
 
 **Do not copy these version numbers anywhere.** Read `APP_VERSION`/`BUILD` in
 `index.html` and the backend `/health` payload — a pasted version is stale on paste.
@@ -233,6 +234,47 @@ Deliberate, inherited from the clean template. Offline is a localStorage cache; 
 a fetch-and-compare of `BUILD` against the deployed file. Adding a SW would drag in the
 whole portfolio SW/versioning ritual for little gain on a family app.
 
+### The front end ships Supabase's publishable key, not the legacy anon JWT (2026-11-03)
+
+Supabase disabled this project's **legacy** `anon` and `service_role` keys on
+2026-10-22T21:08Z, the day after the Railway breach. The front end was still shipping the
+legacy `anon` JWT, so **every sign-in had been failing with `401 "Legacy API keys are
+disabled"` for twelve days.** Nobody noticed, because the app looks completely healthy
+until someone reaches the login screen: no banner, no console error on load, `/health`
+green throughout. Found by the FitnessCaptain session sweeping the portfolio, not here.
+
+Fixed in 0.7.1: `SUPABASE_ANON_KEY` became `SUPABASE_PUBLISHABLE_KEY` holding the
+project's `sb_publishable_...` key, which `supabase-js` takes as a drop-in in
+`createClient`. The name matches MenuCaptain, ContactCaptain and PriorityCaptain.
+
+**The trap inside the fix:** `CONFIGURED` tested `SUPABASE_ANON_KEY.startsWith("eyJ")`.
+That is a *placeholder* guard, not a security check — it proves a real key was pasted in
+rather than a `YOUR-CROSSMATE-...` stub, so the app can show "Setup pending" instead of
+failing cryptically. A straight key swap passes the key but **fails that check**, which
+would have booted the whole app into "not configured" mode with sign-in disabled: a
+different, louder outage. The check now tests the `sb_publishable_` prefix and says in a
+comment which job it does, so the next format change does not look like a typo.
+
+**The road not taken:** re-enabling legacy keys in the Supabase dashboard also fixes
+sign-in, in one click. Rejected — the toggle is project-wide and reversible, so the next
+flip locks everyone out again, and it leaves the real work undone.
+
+**How it was proved, and why the login screen is not the test.** POST to
+`/auth/v1/token?grant_type=password` with a made-up address and password, `apikey` set to
+each key in turn. The legacy key returns `401 Legacy API keys are disabled`; the
+publishable key returns `400 invalid_credentials`, which is the *correct* answer for a bad
+password, so **the 400 is the pass**. Testing through the UI cannot separate "key refused"
+from "wrong password" without using a real account.
+
+**The backend was checked and needs nothing.** It holds a legacy `service_role` key, but
+it only ever passes it to `create_client` for PostgREST, which still honours legacy keys,
+and it verifies user tokens **locally against the public JWKS endpoint** (`verify_jwt`,
+`main.py`), which needs no API key at all. There is no admin-auth call anywhere — no
+account deletion, no user listing — so nothing here fails. That is luck rather than
+design: in an app with an account-deletion path, the same legacy key would fail silently
+while `/health` stayed green. See [[railway-security-incident-2026-10]] for why the key is
+still unrotated.
+
 ### Supabase email confirmation is OFF (2026-07-13)
 
 Sign-up is instant with no email. Chosen because Supabase's built-in mail is rate-limited
@@ -253,6 +295,13 @@ community menus, email.
 ---
 
 ## Traps (each with the incident behind it)
+
+- **A Supabase key can be switched off under a shipped build.** The front end embeds the
+  key at build time, so a key disabled at Supabase breaks sign-in on every installed copy
+  with no deploy and no error until someone logs in. `/health` cannot see it; the backend
+  cannot see it. **Whenever sign-in fails, check the key's `disabled` flag with the
+  Supabase connector's `get_publishable_keys` before reading any app code** (2026-10-22,
+  found 2026-11-03).
 
 - **Railway sleeps.** An idle backend returns HTTP 000 after ~40s on the first request,
   then wakes in about a second. This presented as "the app stays loading" **and** as "Check
