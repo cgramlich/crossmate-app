@@ -69,7 +69,8 @@ check (NO service worker, matching the clean base). Parity build, NOT a store ta
   Bump BOTH on every deploy (BUILD must be strictly newer or the update prompt won't fire).
 
 ## CONFIG (top of the <script> in index.html) - set at cloud stand-up
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY` (public-safe anon key), `API_BASE` (Railway backend).
+- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` (public-safe `sb_publishable_...` key - NOT the
+  legacy anon JWT, which Supabase disabled on 2026-10-22), `API_BASE` (Railway backend).
 - `CONFIGURED` auto-detects the placeholders; until set, the app boots to the auth screen
   with a "Setup pending" banner and sign-in disabled.
 

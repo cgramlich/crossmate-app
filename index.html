@@ -231,8 +231,8 @@ label.lbl{font-size:13px;font-weight:600;color:var(--ink-2);}
 const { useState, useEffect, useCallback, useRef } = React;
 
 /* ---- version + logging ---- */
-const APP_VERSION = "0.7.0";
-const BUILD = "2026-09-28.1";
+const APP_VERSION = "0.7.1";
+const BUILD = "2026-11-03.1";
 function buildIsNewer(a, b){
   const parse = s => String(s||"").split(/[-.]/).map(n=>parseInt(n,10)||0);
   const pa=parse(a), pb=parse(b), len=Math.max(pa.length,pb.length);
@@ -264,18 +264,23 @@ const lsSet = (k, v) => { try{ localStorage.setItem(NS+k, JSON.stringify(v)); }c
 
 /* ============================================================
    BACKEND + AUTH CONFIG
-   PUBLIC-SAFE values only. The Supabase anon key permits auth, not data
+   PUBLIC-SAFE values only. The Supabase publishable key permits auth, not data
    access (data flows through the backend with the user's token). The real
    secrets live only on the Railway backend.
-   TODO (cloud stand-up): set these to the Crossmate Supabase project + the
-   Railway backend URL. Until then the app runs in "not configured" mode.
+   This MUST be the publishable key (sb_publishable_...), never the legacy anon
+   JWT: Supabase disabled this project's legacy keys on 2026-10-22, and a legacy
+   key now fails every sign-in with 401 "Legacy API keys are disabled".
    ============================================================ */
 const SUPABASE_URL      = "https://cosxmhvsnghrbfrtysvg.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvc3htaHZzbmdocmJmcnR5c3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5OTc0OTQsImV4cCI6MjA5OTU3MzQ5NH0.mjRpd2eU-4tT0XICbmRwUCM8JVEdyKnTWMu_8C_dJdI";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_goKthpg2qX097g0Ut6l76A_apUAChU2";
 const API_BASE          = "https://web-production-8202f.up.railway.app";
-const CONFIGURED = !SUPABASE_URL.includes("YOUR-CROSSMATE") && !API_BASE.includes("YOUR-CROSSMATE") && SUPABASE_ANON_KEY.startsWith("eyJ");
+// The key prefix check is a placeholder guard, not a security check: it proves a real
+// key was pasted in rather than a "YOUR-CROSSMATE-..." stub, so the app can fall back to
+// "not configured" mode instead of failing mysteriously at the login screen. It used to
+// test for "eyJ" (a JWT header) and had to change with the key format.
+const CONFIGURED = !SUPABASE_URL.includes("YOUR-CROSSMATE") && !API_BASE.includes("YOUR-CROSSMATE") && SUPABASE_PUBLISHABLE_KEY.startsWith("sb_publishable_");
 
-const supa = CONFIGURED ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+const supa = CONFIGURED ? supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth:{ persistSession:true, autoRefreshToken:true, storage:window.localStorage, storageKey:"crossmate-auth" }
 }) : null;
 
